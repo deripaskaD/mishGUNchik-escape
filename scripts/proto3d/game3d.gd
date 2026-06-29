@@ -2218,7 +2218,9 @@ func _hotbar_slot(layer: CanvasLayer, pos: Vector2, col: Color, name: String) ->
 	return cnt
 
 func _build_touch() -> void:
-	show_touch = DisplayServer.is_touchscreen_available() or _touch_flag
+	# На web is_touchscreen_available() часто врёт (true на десктопе) → показывал тач-джойстик вместо WASD/мыши.
+	# На web по умолчанию десктоп-управление (клавиатура+мышь); тач — только нативный мобайл или флаг --touch.
+	show_touch = _touch_flag or (DisplayServer.is_touchscreen_available() and not OS.has_feature("web"))
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	var root := Control.new()
@@ -2410,7 +2412,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_pause()
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE and not show_touch and not paused:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	elif event is InputEventScreenTouch:
+	elif show_touch and event is InputEventScreenTouch:
 		var vp := get_viewport().get_visible_rect().size
 		if event.pressed:
 			if event.position.x < vp.x * 0.45 and joy_id < 0:
@@ -2424,7 +2426,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				touch_move = Vector2.ZERO
 			if event.index == look_id:
 				look_id = -1
-	elif event is InputEventScreenDrag:
+	elif show_touch and event is InputEventScreenDrag:
 		if event.index == joy_id:
 			touch_move = ((event.position - joy_origin) / 95.0).limit_length(1.0)
 		elif event.index == look_id:
@@ -2943,7 +2945,7 @@ func _refresh_hud() -> void:
 	if wake > 0.0:
 		phase = "Мишганчик ещё спит (%0.0f с) — успей сделать дела" % wake
 	# верх-лево: только статус (фаза + ресурсы). Управление — в меню паузы.
-	hud.text = "Ночь %d · %s\n🪵 Дрова: %d    🌿 Травы: %d" % [nights, phase, wood, herbs]
+	hud.text = "Ночь %d · %s\nДрова: %d    Травы: %d" % [nights, phase, wood, herbs]
 	# верх-центр: квест-зона (компас к цели + текущее дело), под прогресс-баром
 	var qp := ""
 	var tq := _nearest_target()
@@ -2956,15 +2958,12 @@ func _refresh_hud() -> void:
 		var rgt := player.global_transform.basis.x
 		var fdot := fwd.x * dn3.x + fwd.z * dn3.z
 		var sdot := rgt.x * dn3.x + rgt.z * dn3.z
-		var arrow := "↑"
+		# ASCII-стрелки (Юникод-стрелки ↑→ нет в шрифте web-экспорта → рендерились квадратами)
+		var arrow := "^"
 		if fdot < -0.3:
-			arrow = "↓"
+			arrow = "v"
 		elif fdot < 0.4:
-			arrow = "→" if sdot > 0 else "←"
-		elif sdot > 0.25:
-			arrow = "↗"
-		elif sdot < -0.25:
-			arrow = "↖"
+			arrow = ">" if sdot > 0 else "<"
 		qp = "%s  %s  (%0.0f м)" % [arrow, tq["label"], dist]
 	var cq := _current_quest()
 	if not cq.is_empty():
