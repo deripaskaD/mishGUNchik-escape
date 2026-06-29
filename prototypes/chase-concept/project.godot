@@ -1,0 +1,29 @@
+; PROTOTYPE - NOT FOR PRODUCTION
+; Question: ощущается ли постоянная погоня шалуна как веселье, а не фрустрация?
+; Date: 2026-06-24
+; Изолированный throwaway-проект. Открой эту папку в Godot 4.7 и нажми Play (F5).
+
+config_version=5
+
+[application]
+
+config/name="Timokha Chase Prototype"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/handheld/orientation=1
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+
+[input_devices]
+
+pointing/emulate_mouse_from_touch=true

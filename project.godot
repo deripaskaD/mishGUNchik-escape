@@ -1,0 +1,47 @@
+; Engine configuration file.
+; Timokha Escape — пародия-оммаж в жанре казуального квест-приключения.
+; Godot 4.7 / GDScript / Mobile renderer / 2D / ландшафт.
+
+config_version=5
+
+[application]
+
+config/name="Побег от Мишганчика"
+config/use_custom_user_dir=true
+config/custom_user_dir_name="MishganchikEscape"
+config/description="3D-квест от первого лица: днём выполняй дела в туманном лесу, ночью убегай от Мишганчика, почини яхту и сбеги. Плейсхолдер-ассеты на примитивах."
+run/main_scene="res://scenes/main3d.tscn"
+config/icon="res://icon.png"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[audio]
+
+driver/output_latency=40
+driver/output_latency.web=60
+
+[autoload]
+
+GameData="*res://scripts/data/game_data.gd"
+GS="*res://scripts/core/game_state.gd"
+Art="*res://scripts/core/art.gd"
+Sfx="*res://scripts/audio/sfx.gd"
+Music="*res://scripts/audio/music.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/mode=3
+window/handheld/orientation=1
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+pointing/emulate_mouse_from_touch=true

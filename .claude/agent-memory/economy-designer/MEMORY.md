@@ -1,0 +1,3 @@
+- [Emerald Islands — game overview](project-emerald-islands.md) — 2D RPG Godot 4.7, cap 60, dual land+sea progression, 4 classes, 8 zones, MMORPG-style endgame, single-player with MMO illusion
+- [Economy design decisions](economy-decisions.md) — XP formula 48×l^1.62, 5 gear tiers, 7 professions, gold sinks/faucets balance, pity system thresholds
+- [User collaboration style](user-collab.md) — prefers complete production-ready docs delivered without excessive question rounds when task is clearly scoped

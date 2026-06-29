@@ -1,0 +1,2 @@
+- [Art Bible Created](art-bible-created.md) — арт-библия v1.0 написана: 11 секций, стиль аниме cel-shaded, палитры 8 биомов, промпт-гайд для Pollinations/Flux
+- [Project Visual Identity](project-visual-identity.md) — визуальные столпы: anime cel-shaded, яркое/солнечное, читаемый силуэт, приключенческий вайб, морская романтика

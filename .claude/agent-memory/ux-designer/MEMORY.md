@@ -1,0 +1,3 @@
+- [Project Context](project-emerald-islands.md) — мобильная аниме-RPG, Godot 4.7, iOS/Android ландшафт; суша+море двойной геймплей; референс Florensia
+- [User Collaboration Style](user-collab.md) — пользователь даёт полные задания с контекстом; работает как creative director; ожидает конкретные реализуемые спеки
+- [UX Files Authored](ux-files-index.md) — список созданных UX-документов в design/ux/

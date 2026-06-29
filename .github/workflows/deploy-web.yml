@@ -1,0 +1,64 @@
+name: Deploy Web build to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  GODOT_REL: "4.7-stable"
+  GODOT_TPL: "4.7.stable"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установить Godot 4.7 (headless) + шаблоны экспорта
+        run: |
+          set -e
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_REL}"
+          wget -q "${BASE}/Godot_v${GODOT_REL}_linux.x86_64.zip"
+          wget -q "${BASE}/Godot_v${GODOT_REL}_export_templates.tpz"
+          unzip -q "Godot_v${GODOT_REL}_linux.x86_64.zip"
+          chmod +x "Godot_v${GODOT_REL}_linux.x86_64"
+          sudo mv "Godot_v${GODOT_REL}_linux.x86_64" /usr/local/bin/godot
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_TPL}"
+          unzip -q "Godot_v${GODOT_REL}_export_templates.tpz"
+          mv templates/* "$HOME/.local/share/godot/export_templates/${GODOT_TPL}/"
+
+      - name: Импорт ассетов
+        run: godot --headless --path . --import || true
+
+      - name: Экспорт Web (HTML5)
+        run: |
+          mkdir -p build/web
+          godot --headless --path . --export-release "Web" build/web/index.html
+          # GitHub Pages: SPA-фоллбэк, чтобы прямые ссылки не давали 404
+          cp build/web/index.html build/web/404.html
+
+      - name: Загрузить артефакт Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Деплой на GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

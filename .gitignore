@@ -1,0 +1,20 @@
+# Godot
+.godot/
+.import/
+export.cfg
+*.translation
+# export_presets.cfg НЕ игнорируем — нужен для сборки в GitHub Actions
+
+# Exports / builds
+build/
+*.apk
+*.aab
+*.ipa
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local user data / saves (run-time)
+# (user:// сейв хранится вне проекта; на всякий случай)
+*.save
