@@ -473,6 +473,8 @@ func _build_environment() -> void:
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.70, 0.74, 0.74)
 	env.fog_density = 0.020
+	env.fog_height = 6.0              # уровень для приземного тумана
+	env.fog_height_density = 0.0     # ночью включается (см. _day_night) — стелющийся туман
 	we.environment = env
 	add_child(we)
 
@@ -2769,6 +2771,7 @@ func _day_night() -> void:
 	env.ambient_light_energy = lerpf(0.40, 0.12, nf)   # день: ниже заливающий свет → объёмнее, не «прожектор»
 	env.background_energy_multiplier = lerpf(1.0, 0.22, nf)   # затемнить само небо ночью (BG_SKY не темнел → было светло)
 	env.fog_density = lerpf(0.013, 0.042, nf) + sin(clock * 0.15) * 0.0025   # день: меньше белёсой дымки
+	env.fog_height_density = lerpf(0.0, 0.07, nf)   # ночью — стелющийся туман у земли (хоррор)
 	env.fog_light_color = Color(0.70, 0.74, 0.74).lerp(Color(0.18, 0.21, 0.30), nf)   # глубже/холоднее/темнее ночью
 	if moon != null:                                   # прохладная лунная подсветка ночью
 		moon.visible = nf > 0.02
