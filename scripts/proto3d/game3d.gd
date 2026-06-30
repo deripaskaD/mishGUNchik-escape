@@ -171,6 +171,16 @@ var lives := MAX_LIVES
 var lives_label: Label
 var revive_btn: Button
 var _revived := false   # воскрешение «за рекламу» доступно один раз за забег (заглушка)
+# ── джампскейры: резкое появление Мишганчика крупным планом + звук ──
+var js_root: Control       # полноэкранный оверлей джампскейра
+var js_face: TextureRect
+var js_bg: ColorRect
+var js_t := 0.0            # таймер показа
+var js_dur := 0.0
+var js_peak := 1.0        # макс. непрозрачность (1 — полный скейр, <1 — лёгкий мельк)
+var js_cd := 0.0          # кулдаун между скейрами (анти-спам)
+var _js_prox_armed := true   # триггер близости перезаряжается, когда Мишганчик далеко
+var _js_glimpse_t := 8.0     # таймер случайного «мелька» ночью
 var win_overlay: ColorRect
 var win_label: Label
 
@@ -337,6 +347,9 @@ func _ready() -> void:
 		clock = DAY_LEN * 0.53   # закат — тёплое небо у горизонта
 		if rain != null:
 			rain.emitting = false
+	if "--shotjs" in args:
+		_shot = true
+		_jumpscare(5.0, 1.0, null)   # показать оверлей джампскейра для скриншота
 	if "--shotnote" in args:
 		_shot = true
 		_reveal_note()           # показать всплывающую записку лора
@@ -2421,6 +2434,26 @@ void fragment() {
 	lives_label.add_theme_constant_override("outline_size", 5)
 	lives_label.text = "Жизни: %d" % lives
 	layer.add_child(lives_label)
+	# ── оверлей джампскейра (поверх игрового HUD) ──
+	js_root = Control.new()
+	js_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	js_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	js_root.modulate.a = 0.0
+	js_root.visible = false
+	layer.add_child(js_root)
+	js_bg = ColorRect.new()
+	js_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	js_bg.color = Color(0.15, 0.0, 0.0)   # тёмно-красный фон под фигурой
+	js_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	js_root.add_child(js_bg)
+	js_face = TextureRect.new()
+	js_face.set_anchors_preset(Control.PRESET_FULL_RECT)
+	js_face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	js_face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	js_face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if ResourceLoader.exists("res://art/mishganchik.png"):
+		js_face.texture = load("res://art/mishganchik.png")
+	js_root.add_child(js_face)
 	# квест-зона: компас к цели + прогресс текущего дела (верх-центр, под счётчиком)
 	quest_panel = Label.new()
 	quest_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -2925,6 +2958,19 @@ func _process(delta: float) -> void:
 	if note_panel != null:
 		note_t = maxf(0.0, note_t - delta)
 		note_panel.modulate.a = clampf(note_t, 0.0, 1.0)   # пергамент плавно гаснет
+	# джампскейр: спад показа + кулдаун + редкий ночной «мельк»
+	if js_cd > 0.0:
+		js_cd = maxf(0.0, js_cd - delta)
+	if js_root != null and js_t > 0.0:
+		js_t = maxf(0.0, js_t - delta)
+		js_root.modulate.a = (js_t / maxf(js_dur, 0.01)) * js_peak
+		if js_t <= 0.0:
+			js_root.visible = false
+	if not _autoplay and not won and not lost and not paused and _is_night():
+		_js_glimpse_t -= delta
+		if _js_glimpse_t <= 0.0:
+			_js_glimpse_t = randf_range(30.0, 60.0)
+			_jumpscare(0.32, 0.55, snd_dread)   # лёгкий мельк фигуры в темноте
 	if danger_overlay != null:
 		var dval := 0.0
 		var vstr := 0.42   # базовый кинотон виньетки
@@ -3011,6 +3057,8 @@ func _physics_process(delta: float) -> void:
 		_cd = 2.5
 		last_seen = player.global_position
 		_play(snd_stinger)
+		if not _autoplay:
+			_jumpscare(0.4, 0.75, null)   # ТРИГГЕР: наступила ночь — короткая вспышка лица (стингер уже играет)
 		if done_label != null:
 			done_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.35))
 			done_label.text = "НОЧЬ! Мишганчик рядом — беги!"
@@ -3387,7 +3435,14 @@ func _check_catch() -> void:
 	if stun > 0.0 or wake > 0.0 or not _is_night():
 		return
 	var to := player.global_position - timokha.global_position
-	if Vector2(to.x, to.z).length() < CATCH_DIST:
+	var dist := Vector2(to.x, to.z).length()
+	# ТРИГГЕР: близкий рывок — Мишганчик почти достал → джампскейр (перезаряжается, когда он далеко)
+	if dist > 22.0:
+		_js_prox_armed = true
+	elif dist < 10.0 and dist >= CATCH_DIST and _js_prox_armed and not _autoplay:
+		_js_prox_armed = false
+		_jumpscare(0.5, 1.0, snd_stinger)
+	if dist < CATCH_DIST:
 		caught += 1
 		_play(snd_caught)
 		_play(snd_laugh)                  # комичный смех Мишганчика вдогонку
@@ -3402,6 +3457,8 @@ func _check_catch() -> void:
 			wake = 4.0
 			return
 		lives -= 1
+		js_cd = 0.0                       # сбросить кулдаун — поимка всегда даёт джампскейр
+		_jumpscare(0.6, 1.0, snd_caught)  # ТРИГГЕР: поимка — лицо на весь экран
 		if lives > 0:
 			# мягкий проигрыш: быстрый респаун у избы, передышка — петля продолжается (детям не обидно)
 			_soft_respawn()
@@ -3444,6 +3501,20 @@ func _revive() -> void:
 	_show_gameplay_hud()
 	if not (_shot or _shotin):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func _jumpscare(dur: float, peak: float, snd: AudioStreamPlayer) -> void:
+	# резкое появление Мишганчика на весь экран + звук + тряска
+	if js_root == null or js_cd > 0.0 or won or lost or paused:
+		return
+	js_dur = dur
+	js_t = dur
+	js_peak = peak
+	js_cd = 6.0
+	shake = maxf(shake, peak * 0.6)
+	js_root.visible = true
+	js_root.modulate.a = peak
+	if snd != null:
+		_play(snd)
 
 func _hide_gameplay_hud() -> void:
 	# финальный экран (победа/проигрыш) — прячем игровой HUD/контролы, оставляя только итог
