@@ -307,6 +307,11 @@ func _ready() -> void:
 		pitch = 0.7              # дневное небо/облака
 		if cam != null:
 			cam.rotation.x = 0.7
+	if "--shotdusk" in args:
+		_shot = true
+		clock = DAY_LEN * 0.53   # закат — тёплое небо у горизонта
+		if rain != null:
+			rain.emitting = false
 		if rain != null:
 			rain.emitting = false
 	if "--shotflash" in args:
@@ -444,6 +449,7 @@ shader_type sky;
 render_mode use_quarter_res_pass;
 
 uniform float nf : hint_range(0.0, 1.0) = 0.0;   // 0 = день, 1 = глубокая ночь
+uniform float tw : hint_range(0.0, 1.0) = 0.0;   // рассвет/закат (пик в момент смены)
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
@@ -482,6 +488,10 @@ void sky() {
 	vec3 hor = mix(day_hor, night_hor, nf);
 	vec3 col = mix(hor, top, pow(up, 0.55));
 
+	// ── рассвет/закат: тёплая оранжево-розовая дымка у горизонта ──
+	float hb = pow(1.0 - up, 3.0);
+	col = mix(col, vec3(1.0, 0.52, 0.26), tw * hb * 0.75);
+
 	// ── солнце (LIGHT0) днём: диск + ореол ──
 	if (LIGHT0_ENABLED) {
 		float sd = dot(dir, -LIGHT0_DIRECTION);
@@ -516,8 +526,8 @@ void sky() {
 			vec2 sp = vec2(hash(cell + 0.13), hash(cell + 0.71));
 			float dst = length(fr - sp);
 			float star = step(0.72, hs) * smoothstep(0.17, 0.0, dst);
-			float tw = 0.6 + 0.4 * sin(TIME * 2.2 + hs * 120.0);
-			col += star * tw * nf * smoothstep(0.02, 0.12, dir.y) * vec3(0.95, 0.97, 1.0) * 2.4 * (1.0 - c * 0.7);
+			float twk = 0.6 + 0.4 * sin(TIME * 2.2 + hs * 120.0);
+			col += star * twk * nf * smoothstep(0.02, 0.12, dir.y) * vec3(0.95, 0.97, 1.0) * 2.4 * (1.0 - c * 0.7);
 		}
 	}
 
@@ -2893,6 +2903,9 @@ func _day_night() -> void:
 	var nf := clampf(smoothstep(0.48, 0.58, t) - smoothstep(0.92, 1.0, t), 0.0, 1.0)
 	if sky_mat != null:
 		sky_mat.set_shader_parameter("nf", nf)   # небо темнеет + проявляются звёзды/луна через шейдер
+		var dusk := 1.0 - clampf(absf(t - 0.53) / 0.07, 0.0, 1.0)   # закат
+		var dawn := 1.0 - clampf(absf(t - 0.96) / 0.06, 0.0, 1.0)   # рассвет
+		sky_mat.set_shader_parameter("tw", maxf(dusk, dawn))
 	sun.light_energy = lerpf(1.2, 0.08, nf)
 	sun.shadow_enabled = (not _mobile) and (nf < 0.5)   # на телефоне тени выкл; ночью солнце за горизонтом → тоже выкл
 	env.ambient_light_energy = lerpf(0.40, 0.12, nf)   # день: ниже заливающий свет → объёмнее, не «прожектор»
