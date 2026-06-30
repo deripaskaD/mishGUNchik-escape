@@ -474,13 +474,13 @@ void sky() {
 	float up = clamp(dir.y, 0.0, 1.0);
 
 	// ── градиент неба (день ↔ ночь) ──
-	vec3 day_top = vec3(0.22, 0.43, 0.78);
-	vec3 day_hor = vec3(0.74, 0.80, 0.84);
+	vec3 day_top = vec3(0.14, 0.42, 0.92);   // насыщенный голубой зенит (ярко — детям)
+	vec3 day_hor = vec3(0.58, 0.82, 1.0);    // светло-голубой горизонт (НЕ серый)
 	vec3 night_top = vec3(0.015, 0.025, 0.07);
 	vec3 night_hor = vec3(0.06, 0.08, 0.15);
 	vec3 top = mix(day_top, night_top, nf);
 	vec3 hor = mix(day_hor, night_hor, nf);
-	vec3 col = mix(hor, top, pow(up, 0.45));
+	vec3 col = mix(hor, top, pow(up, 0.55));
 
 	// ── солнце (LIGHT0) днём: диск + ореол ──
 	if (LIGHT0_ENABLED) {
@@ -494,13 +494,18 @@ void sky() {
 	if (dir.y > 0.0) {
 		vec2 proj = dir.xz / (dir.y + 0.16);
 
-		// ── облака (FBM, медленный дрейф); ночью тоньше, чтобы открыть звёзды ──
-		vec2 cuv = proj * 1.1 + vec2(TIME * 0.006, TIME * 0.002);
-		c = fbm(cuv * 1.4);
-		c = smoothstep(0.50, 0.92, c);
-		c *= smoothstep(0.0, 0.22, dir.y);                 // тают у горизонта
-		c *= (1.0 - nf);                                    // ночью безоблачно → чистое звёздное небо
-		col = mix(col, vec3(1.0, 0.99, 0.97), c);          // облака только днём (белые)
+		// ── облака (двухслойный FBM = пышные кучевые; объём через свет/тень) ──
+		vec2 cuv = proj * 1.0 + vec2(TIME * 0.005, TIME * 0.0015);
+		float base = fbm(cuv * 1.2);
+		float detail = fbm(cuv * 3.1 + 5.0);
+		float dens = base * 0.72 + detail * 0.28;
+		c = smoothstep(0.42, 0.80, dens);                  // мягкие пышные комки
+		c *= smoothstep(0.0, 0.18, dir.y);                 // тают у горизонта
+		c *= (1.0 - nf);                                    // ночью безоблачно → чистые звёзды
+		float vol = smoothstep(0.40, 0.92, base);          // плотный центр = ярче (псевдо-объём)
+		vec3 cloud_lo = vec3(0.72, 0.80, 0.92);            // низ/края — голубовато-серый
+		vec3 cloud_hi = vec3(1.0, 1.0, 1.0);               // макушки — яркий белый (солнце сверху)
+		col = mix(col, mix(cloud_lo, cloud_hi, vol), c);
 
 		// ── звёзды (сферические координаты — равномерно, без схлопывания в зените) ──
 		if (nf > 0.04) {
@@ -567,7 +572,7 @@ func _build_environment() -> void:
 	env.adjustment_enabled = true
 	env.adjustment_brightness = 1.0
 	env.adjustment_contrast = 1.18   # больше контраста — не плоско
-	env.adjustment_saturation = 1.14
+	env.adjustment_saturation = 1.22   # сочнее цвета (детям ярко)
 	# мягкое свечение ярких/эмиссивных поверхностей (огонь/окна/луна/лампа)
 	env.glow_enabled = not _mobile   # glow выключен на телефоне (перф)
 	env.glow_intensity = 0.45
@@ -576,6 +581,7 @@ func _build_environment() -> void:
 	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	env.fog_enabled = true
+	env.fog_sky_affect = 0.1          # туман почти не трогает небо → небо остаётся ярким (раньше вымывал в серость)
 	env.fog_light_color = Color(0.70, 0.74, 0.74)
 	env.fog_density = 0.020
 	env.fog_height = 6.0              # уровень для приземного тумана
@@ -2890,9 +2896,10 @@ func _day_night() -> void:
 	sun.light_energy = lerpf(1.2, 0.08, nf)
 	sun.shadow_enabled = (not _mobile) and (nf < 0.5)   # на телефоне тени выкл; ночью солнце за горизонтом → тоже выкл
 	env.ambient_light_energy = lerpf(0.40, 0.12, nf)   # день: ниже заливающий свет → объёмнее, не «прожектор»
-	env.fog_density = lerpf(0.013, 0.042, nf) + sin(clock * 0.15) * 0.0025   # день: меньше белёсой дымки
+	env.fog_density = lerpf(0.011, 0.042, nf) + sin(clock * 0.15) * 0.0025   # день: меньше белёсой дымки
 	env.fog_height_density = lerpf(0.0, 0.07, nf)   # ночью — стелющийся туман у земли (хоррор)
-	env.fog_light_color = Color(0.70, 0.74, 0.74).lerp(Color(0.18, 0.21, 0.30), nf)   # глубже/холоднее/темнее ночью
+	env.fog_light_color = Color(0.60, 0.80, 1.0).lerp(Color(0.18, 0.21, 0.30), nf)   # день: голубоватая дымка (не серая); ночь: тёмно-синяя
+	env.tonemap_exposure = lerpf(1.06, 0.85, nf)   # день ярче (детям сочно), ночь темнее (хоррор)
 	if moon != null:                                   # прохладная лунная подсветка ночью
 		moon.visible = nf > 0.02
 		moon.light_energy = lerpf(0.0, 0.30, nf)
