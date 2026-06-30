@@ -4,7 +4,7 @@ extends Node3D
 ## Тимоха гонится, день/ночь, дождь. Примитивы-плейсхолдеры (заменяемы на 3D-модели).
 
 const WORLD := 220.0          # полупролёт карты (440x440 м) — большой лес
-const TREES := 1850         # очень густой лес (FPS-запас подтверждён)
+const TREES := 2400         # очень густой лес (на мобиле /3)
 const TREE_SCALE := 5.2     # крупные GLB-деревья Kenney (густой высокий лес)
 const BORDER_TREES := 320   # плотная стена леса по периметру карты
 const CLEARING := 11.0        # радиус поляны у избы без деревьев (меньше → лес ближе к дому)
@@ -1267,14 +1267,14 @@ func _build_forest() -> void:
 				continue
 			_tree(Vector3(bx, 0, bz), rng.randf_range(1.0, 1.6), rng.randf() < 0.3)
 	# валуны (больше для большой карты)
-	for i in 64:
+	for i in (40 if _mobile else 95):
 		var x := rng.randf_range(-WORLD + 6, WORLD - 6)
 		var z := rng.randf_range(-WORLD + 6, WORLD - 6)
 		if Vector2(x, z).length() < CLEARING or (z > WORLD - 42.0 and abs(x) < 55.0):
 			continue
 		_rock(Vector3(x, 0, z), rng.randf_range(0.6, 2.4))
 	# кусты-подлесок (разнообразие)
-	for i in 90:
+	for i in (70 if _mobile else 190):
 		var bx := rng.randf_range(-WORLD + 6, WORLD - 6)
 		var bz := rng.randf_range(-WORLD + 6, WORLD - 6)
 		if Vector2(bx, bz).length() < CLEARING or (bz > WORLD - 42.0 and abs(bx) < 55.0):
@@ -1301,7 +1301,7 @@ func _build_forest() -> void:
 			bush.material_override = m_leaf
 			add_child(bush)
 	# пеньки и поваленные брёвна
-	for i in 44:
+	for i in (24 if _mobile else 66):
 		var lx := rng.randf_range(-WORLD + 6, WORLD - 6)
 		var lz := rng.randf_range(-WORLD + 6, WORLD - 6)
 		if Vector2(lx, lz).length() < CLEARING or (lz > WORLD - 42.0 and abs(lx) < 55.0) or _on_path(lx, lz):
