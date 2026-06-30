@@ -140,6 +140,26 @@ var _tut_t := 9.0
 var paused := false
 var pause_overlay: ColorRect
 var pause_controls: Label
+# ── ЛОР: записки, раскрывающиеся по мере выполнения дневных дел (драйвер «теорий», длиннее сессия) ──
+const LORE := [
+	"Дневник, день 1. Все уехали с острова на большой лодке. Меня не взяли — сказали, вернутся к утру.",
+	"День 9. Лодка так и не вернулась. Туман не уходит уже неделю. Ночью кто-то ходит вокруг избы.",
+	"Старики звали его Мишганчик — сторож острова. Я думал, это просто страшилка для детей.",
+	"День 20. Я больше не один. Он не злой… просто не хочет, чтобы кто-то уплывал. Боится остаться совсем один.",
+	"У идола вырезано: «Кто построит лодку — разбудит сторожа. Кто уплывёт — освободит его».",
+	"Под мельницей — старый колодец. На дне виден свет. Туда уходили те, кто пытался сбежать…",
+	"День 40. Яхта почти готова. Если читаешь это — ночью только БЕГИ. Он быстрее, когда ты стоишь.",
+	"Я уплыл. Но в тумане за островом горят ещё огни. Мишганчик был не единственным сторожем… (продолжение следует)",
+]
+var note_panel: Panel
+var note_label: Label
+var note_t := 0.0
+var lore_idx := 0
+var lore_found: Array = []
+var journal_btn: Button
+var journal_panel: ColorRect
+var journal_label: Label
+var journal_open := false
 var window_mats: Array = []
 var snd_btn: Button
 var _muted := false
@@ -312,6 +332,16 @@ func _ready() -> void:
 		clock = DAY_LEN * 0.53   # закат — тёплое небо у горизонта
 		if rain != null:
 			rain.emitting = false
+	if "--shotnote" in args:
+		_shot = true
+		_reveal_note()           # показать всплывающую записку лора
+	if "--shotjournal" in args:
+		_shot = true
+		_reveal_note()
+		_reveal_note()
+		_reveal_note()
+		_reveal_note()
+		_toggle_journal()        # открыть дневник с записками
 		if rain != null:
 			rain.emitting = false
 	if "--shotflash" in args:
@@ -2318,6 +2348,32 @@ void fragment() {
 	done_label.add_theme_constant_override("outline_size", 8)
 	done_label.modulate.a = 0.0
 	layer.add_child(done_label)
+	# ── всплывающая записка лора (пергамент) ──
+	note_panel = Panel.new()
+	var nps := StyleBoxFlat.new()
+	nps.bg_color = Color(0.93, 0.86, 0.66, 0.96)   # пергамент
+	nps.border_color = Color(0.40, 0.28, 0.14)
+	nps.set_border_width_all(3)
+	nps.set_corner_radius_all(10)
+	nps.content_margin_left = 22
+	nps.content_margin_right = 22
+	nps.content_margin_top = 16
+	nps.content_margin_bottom = 16
+	note_panel.add_theme_stylebox_override("panel", nps)
+	note_panel.size = Vector2(560, 150)
+	note_panel.position = Vector2(vp.x * 0.5 - 280, vp.y * 0.5 - 75)
+	note_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	note_panel.modulate.a = 0.0
+	layer.add_child(note_panel)
+	note_label = Label.new()
+	note_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	note_label.add_theme_font_size_override("font_size", 21)
+	note_label.add_theme_color_override("font_color", Color(0.20, 0.13, 0.05))
+	note_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	note_panel.add_child(note_label)
 	# прогресс-бар квестов сверху по центру
 	var bw := 340.0
 	var qbg := ColorRect.new()
@@ -2477,24 +2533,93 @@ void fragment() {
 	snd_btn.add_theme_font_size_override("font_size", 22)
 	snd_btn.pressed.connect(_toggle_mute)
 	pause_overlay.add_child(snd_btn)
+	journal_btn = Button.new()
+	journal_btn.text = "Дневник (0/%d)" % LORE.size()
+	journal_btn.size = Vector2(240, 56)
+	journal_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 76)
+	journal_btn.add_theme_font_size_override("font_size", 22)
+	journal_btn.pressed.connect(_toggle_journal)
+	pause_overlay.add_child(journal_btn)
 	var btn_quit := Button.new()
 	btn_quit.text = "Выход"
 	btn_quit.size = Vector2(240, 56)
-	btn_quit.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 76)
+	btn_quit.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 144)
 	btn_quit.add_theme_font_size_override("font_size", 22)
 	btn_quit.pressed.connect(_quit_game)
 	pause_overlay.add_child(btn_quit)
 	# подсказка управления — только здесь, в паузе (не засоряет игровой HUD); текст ставится в _ready по show_touch
 	pause_controls = Label.new()
 	pause_controls.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	pause_controls.offset_top = vp.y * 0.5 + 156
-	pause_controls.offset_bottom = vp.y * 0.5 + 240
+	pause_controls.offset_top = vp.y * 0.5 + 214
+	pause_controls.offset_bottom = vp.y * 0.5 + 298
 	pause_controls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_controls.add_theme_font_size_override("font_size", 17)
 	pause_controls.add_theme_color_override("font_color", Color(0.8, 0.85, 0.95))
 	pause_controls.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	pause_controls.add_theme_constant_override("outline_size", 4)
 	pause_overlay.add_child(pause_controls)
+	# ── Дневник: оверлей со всеми найденными записками ──
+	journal_panel = ColorRect.new()
+	journal_panel.color = Color(0.05, 0.04, 0.03, 0.95)
+	journal_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	journal_panel.visible = false
+	layer.add_child(journal_panel)
+	var jtitle := Label.new()
+	jtitle.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	jtitle.offset_top = 26
+	jtitle.offset_bottom = 76
+	jtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	jtitle.add_theme_font_size_override("font_size", 34)
+	jtitle.add_theme_color_override("font_color", Color(0.95, 0.86, 0.6))
+	jtitle.text = "ДНЕВНИК ОСТРОВА"
+	journal_panel.add_child(jtitle)
+	var jscroll := ScrollContainer.new()
+	jscroll.position = Vector2(vp.x * 0.5 - 380, 90)
+	jscroll.size = Vector2(760, vp.y - 190)
+	jscroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	journal_panel.add_child(jscroll)
+	journal_label = Label.new()
+	journal_label.custom_minimum_size = Vector2(760, 0)
+	journal_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	journal_label.add_theme_font_size_override("font_size", 20)
+	journal_label.add_theme_color_override("font_color", Color(0.88, 0.84, 0.76))
+	jscroll.add_child(journal_label)
+	var jclose := Button.new()
+	jclose.text = "Закрыть"
+	jclose.size = Vector2(200, 52)
+	jclose.position = Vector2(vp.x * 0.5 - 100, vp.y - 78)
+	jclose.add_theme_font_size_override("font_size", 22)
+	jclose.pressed.connect(_toggle_journal)
+	journal_panel.add_child(jclose)
+
+func _reveal_note() -> void:
+	if lore_idx >= LORE.size():
+		return
+	var txt: String = LORE[lore_idx]
+	lore_found.append(txt)
+	lore_idx += 1
+	if note_panel != null and note_label != null:
+		note_label.text = "• НАЙДЕНА ЗАПИСКА •\n\n" + txt
+		note_t = 6.5
+	if journal_btn != null:
+		journal_btn.text = "Дневник (%d/%d)" % [lore_found.size(), LORE.size()]
+
+func _toggle_journal() -> void:
+	if journal_panel == null:
+		return
+	journal_open = not journal_panel.visible
+	if journal_open:
+		var s := ""
+		if lore_found.is_empty():
+			s = "Записок пока нет.\nВыполняй дневные дела — и узнаешь, кто такой Мишганчик и почему он не выпускает с острова…"
+		else:
+			for i in lore_found.size():
+				s += "— %s\n\n" % lore_found[i]
+			if lore_found.size() < LORE.size():
+				s += "(ещё %d записок где-то на острове…)" % (LORE.size() - lore_found.size())
+		if journal_label != null:
+			journal_label.text = s
+	journal_panel.visible = journal_open
 
 func _toggle_pause() -> void:
 	paused = not paused
@@ -2775,6 +2900,9 @@ func _process(delta: float) -> void:
 	if done_label != null:
 		done_t = maxf(0.0, done_t - delta)
 		done_label.modulate.a = clampf(done_t, 0.0, 1.0)
+	if note_panel != null:
+		note_t = maxf(0.0, note_t - delta)
+		note_panel.modulate.a = clampf(note_t, 0.0, 1.0)   # пергамент плавно гаснет
 	if danger_overlay != null:
 		var dval := 0.0
 		var vstr := 0.42   # базовый кинотон виньетки
@@ -3166,6 +3294,7 @@ func _update_quests(delta: float) -> void:
 					if catch_flash != null:
 						catch_flash.color = Color(0.2, 1.0, 0.4, 0.0)
 						flash_v = 0.5
+					_reveal_note()   # дневное дело → раскрыть следующую записку лора
 					if done_label != null:
 						done_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.55))
 						done_label.text = str(q["label"]) + " — готово!"
