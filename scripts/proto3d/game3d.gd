@@ -792,11 +792,54 @@ func _scatter_global(names: Array, count: int, scl: float) -> void:
 		m.rotation.y = rng.randf() * TAU
 		add_child(m)
 
+func _scatter_clumps(names: Array, clumps: int, per_clump: int, radius: float, scl: float) -> void:
+	# кучки подлеска (трава/мелкие кусты) — естественные пятна, а не одиночки
+	var scenes: Array = []
+	for n in names:
+		var p := "res://art/models/nature/%s.glb" % n
+		if ResourceLoader.exists(p):
+			scenes.append(load(p))
+	if scenes.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7777
+	var placed := 0
+	var attempts := 0
+	while placed < clumps and attempts < clumps * 5:
+		attempts += 1
+		var cx := rng.randf_range(-WORLD + 10, WORLD - 10)
+		var cz := rng.randf_range(-WORLD + 10, WORLD - 10)
+		if Vector2(cx, cz).length() < CLEARING:
+			continue
+		if cz > WORLD - 42.0 and abs(cx) < 55.0:
+			continue
+		if _on_path(cx, cz):
+			continue
+		var skip := false
+		for h in HUTS:
+			if Vector2(cx - h.x, cz - h.z).length() < 7.0:
+				skip = true
+				break
+		if skip:
+			continue
+		placed += 1
+		for j in per_clump:
+			var m: Node3D = scenes[rng.randi() % scenes.size()].instantiate()
+			var s := scl * rng.randf_range(0.7, 1.3)
+			m.scale = Vector3(s, s, s)
+			var a := rng.randf() * TAU
+			var r := rng.randf_range(0.0, radius)
+			m.position = Vector3(cx + cos(a) * r, 0, cz + sin(a) * r)
+			m.rotation.y = rng.randf() * TAU
+			add_child(m)
+
 func _ground_detail() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 909
 	# глобальная флора по всей карте (цветы/трава/грибы) — оживляет лес
 	_scatter_global(["flower_redB", "flower_yellowB", "flower_purpleB", "grass_leafs", "mushroom_tan", "mushroom_red"], 55 if _mobile else 170, 1.5)
+	# кучки подлеска (трава + мелкие кусты) — плотные пятна
+	_scatter_clumps(["grass_leafs", "plant_bushSmall", "flower_yellowB"], 22 if _mobile else 65, 4, 2.6, 1.4)
 	# грибы у квеста «грибы»
 	_scatter_models(["mushroom_red", "mushroom_redGroup", "mushroom_tan", "mushroom_tanGroup"], Vector3(-60, 0, -185), 12, 2.0, 7.0, 2.6, rng)
 	# цветы/трава у квестов с травами
