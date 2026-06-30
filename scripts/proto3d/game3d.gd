@@ -32,6 +32,7 @@ var timokha_mat: StandardMaterial3D
 var sun: DirectionalLight3D
 var moon: DirectionalLight3D
 var env: Environment
+var sky_mat: ShaderMaterial   # кастомное небо: градиент день/ночь + облака + звёзды + луна
 var rain: GPUParticles3D
 var fireflies: CPUParticles3D   # светлячки вокруг игрока ночью (атмосфера)
 var pollen: CPUParticles3D      # пыльца/споры в воздухе днём (атмосфера)
@@ -147,8 +148,6 @@ var restart_btn: Button
 var win_quit_btn: Button
 var win_overlay: ColorRect
 var win_label: Label
-var moon_hud: Control
-var star_dots: Array = []
 
 # мини-карта-радар
 var radar: Control
@@ -293,6 +292,23 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(10, 1.5, 186)
 		player.rotate_y(PI)   # развернуть к причалу/яхте (+Z), фонарь-маяк в кадре
+	if "--shotsky" in args:
+		_shot = true
+		clock = DAY_LEN * 0.72   # ночь (nf=1) — проверка звёзд/луны
+		wake = 0.0
+		_was_night = true
+		pitch = 0.55                # умеренно вверх — небо в кадре (проверка)
+		if cam != null:
+			cam.rotation.x = 0.55
+		if rain != null:
+			rain.emitting = false   # дождь убрать — чистая проверка неба
+	if "--shotskyday" in args:
+		_shot = true
+		pitch = 0.7              # дневное небо/облака
+		if cam != null:
+			cam.rotation.x = 0.7
+		if rain != null:
+			rain.emitting = false
 	if "--shotflash" in args:
 		_shot = true
 		_light_v = 4.5   # к моменту снимка останется частичная вспышка молнии
@@ -423,6 +439,95 @@ void fragment() {
 	m_floor = _mat(Color(0.42, 0.30, 0.18))
 	m_rock = _mat(Color(0.5, 0.5, 0.52))
 
+const SKY_SHADER := "
+shader_type sky;
+render_mode use_quarter_res_pass;
+
+uniform float nf : hint_range(0.0, 1.0) = 0.0;   // 0 = день, 1 = глубокая ночь
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	float a = hash(i);
+	float b = hash(i + vec2(1.0, 0.0));
+	float c = hash(i + vec2(0.0, 1.0));
+	float d = hash(i + vec2(1.0, 1.0));
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+float fbm(vec2 p) {
+	float v = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < 4; i++) {
+		v += a * vnoise(p);
+		p *= 2.02;
+		a *= 0.5;
+	}
+	return v;
+}
+
+void sky() {
+	vec3 dir = normalize(EYEDIR);
+	float up = clamp(dir.y, 0.0, 1.0);
+
+	// ── градиент неба (день ↔ ночь) ──
+	vec3 day_top = vec3(0.22, 0.43, 0.78);
+	vec3 day_hor = vec3(0.74, 0.80, 0.84);
+	vec3 night_top = vec3(0.015, 0.025, 0.07);
+	vec3 night_hor = vec3(0.06, 0.08, 0.15);
+	vec3 top = mix(day_top, night_top, nf);
+	vec3 hor = mix(day_hor, night_hor, nf);
+	vec3 col = mix(hor, top, pow(up, 0.45));
+
+	// ── солнце (LIGHT0) днём: диск + ореол ──
+	if (LIGHT0_ENABLED) {
+		float sd = dot(dir, -LIGHT0_DIRECTION);
+		float disk = smoothstep(0.9988, 0.9994, sd);
+		float glow = pow(max(sd, 0.0), 90.0) * 0.5;
+		col += (disk + glow) * LIGHT0_COLOR * (1.0 - nf);
+	}
+
+	float c = 0.0;
+	if (dir.y > 0.0) {
+		vec2 proj = dir.xz / (dir.y + 0.16);
+
+		// ── облака (FBM, медленный дрейф); ночью тоньше, чтобы открыть звёзды ──
+		vec2 cuv = proj * 1.1 + vec2(TIME * 0.006, TIME * 0.002);
+		c = fbm(cuv * 1.4);
+		c = smoothstep(0.50, 0.92, c);
+		c *= smoothstep(0.0, 0.22, dir.y);                 // тают у горизонта
+		c *= (1.0 - nf);                                    // ночью безоблачно → чистое звёздное небо
+		col = mix(col, vec3(1.0, 0.99, 0.97), c);          // облака только днём (белые)
+
+		// ── звёзды (сферические координаты — равномерно, без схлопывания в зените) ──
+		if (nf > 0.04) {
+			vec2 suv = vec2(atan(dir.x, dir.z), asin(clamp(dir.y, -1.0, 1.0))) * 24.0;
+			vec2 cell = floor(suv);
+			vec2 fr = fract(suv);
+			float hs = hash(cell);
+			vec2 sp = vec2(hash(cell + 0.13), hash(cell + 0.71));
+			float dst = length(fr - sp);
+			float star = step(0.72, hs) * smoothstep(0.17, 0.0, dst);
+			float tw = 0.6 + 0.4 * sin(TIME * 2.2 + hs * 120.0);
+			col += star * tw * nf * smoothstep(0.02, 0.12, dir.y) * vec3(0.95, 0.97, 1.0) * 2.4 * (1.0 - c * 0.7);
+		}
+	}
+
+	// ── луна (низко над лесом, видна при лёгком взгляде вверх) ──
+	vec3 moondir = normalize(vec3(-0.80, 0.36, -0.20));
+	float md = dot(dir, moondir);
+	float mdisk = smoothstep(0.9905, 0.9945, md);
+	float mhalo = pow(smoothstep(0.93, 1.0, md), 2.0) * 0.55;
+	col += (mdisk * vec3(1.15, 1.17, 1.22) + mhalo * vec3(0.55, 0.66, 0.92)) * nf;
+
+	COLOR = col;
+
+}
+"
+
 func _build_environment() -> void:
 	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -40, 0)
@@ -447,12 +552,12 @@ func _build_environment() -> void:
 	env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	var sky := Sky.new()
-	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.42, 0.52, 0.62)
-	sm.sky_horizon_color = Color(0.70, 0.72, 0.70)
-	sm.ground_horizon_color = Color(0.55, 0.55, 0.52)
-	sm.ground_bottom_color = Color(0.40, 0.40, 0.36)
-	sky.sky_material = sm
+	sky_mat = ShaderMaterial.new()
+	var sh := Shader.new()
+	sh.code = SKY_SHADER
+	sky_mat.shader = sh
+	sky_mat.set_shader_parameter("nf", 0.0)
+	sky.sky_material = sky_mat
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 0.55
@@ -2182,53 +2287,7 @@ void fragment() {
 	_set_crosshair_size(5.0)
 	layer.add_child(crosshair)
 	var vp := get_viewport().get_visible_rect().size
-	# HUD-луна: мягкое гало + бледный диск с «морем», проявляется ночью (вверху)
-	moon_hud = Control.new()
-	moon_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	moon_hud.modulate = Color(1, 1, 1, 0.0)
-	layer.add_child(moon_hud)
-	var mcx := vp.x * 0.66
-	var mcy := vp.y * 0.15
-	var glow := Panel.new()
-	var gs := StyleBoxFlat.new()
-	gs.bg_color = Color(0.75, 0.83, 1.0, 0.16)
-	gs.set_corner_radius_all(80)
-	glow.add_theme_stylebox_override("panel", gs)
-	glow.size = Vector2(160, 160)
-	glow.position = Vector2(mcx - 80, mcy - 80)
-	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	moon_hud.add_child(glow)
-	var disc := Panel.new()
-	var ds := StyleBoxFlat.new()
-	ds.bg_color = Color(0.88, 0.92, 1.0, 0.94)
-	ds.set_corner_radius_all(34)
-	disc.add_theme_stylebox_override("panel", ds)
-	disc.size = Vector2(68, 68)
-	disc.position = Vector2(mcx - 34, mcy - 34)
-	disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	moon_hud.add_child(disc)
-	var mare := Panel.new()
-	var ms := StyleBoxFlat.new()
-	ms.bg_color = Color(0.74, 0.80, 0.94, 0.55)
-	ms.set_corner_radius_all(12)
-	mare.add_theme_stylebox_override("panel", ms)
-	mare.size = Vector2(22, 22)
-	mare.position = Vector2(mcx - 4, mcy - 14)
-	mare.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	moon_hud.add_child(mare)
-	# звёзды рядом с луной (проявляются ночью вместе с moon_hud, лёгкое мерцание в _process)
-	var srng := RandomNumberGenerator.new()
-	srng.seed = 424242
-	for i in 16:
-		var st := ColorRect.new()
-		var ssz := srng.randf_range(2.0, 3.6)
-		st.color = Color(0.9, 0.94, 1.0, srng.randf_range(0.5, 0.95))
-		st.size = Vector2(ssz, ssz)
-		st.position = Vector2(srng.randf_range(vp.x * 0.04, vp.x * 0.96), srng.randf_range(vp.y * 0.03, vp.y * 0.34))
-		st.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		moon_hud.add_child(st)
-		star_dots.append(st)
-	layer.move_child(moon_hud, 0)   # за остальным HUD (вспышки/текст поверх)
+	# Луна и звёзды теперь рисует sky-шейдер (см. SKY_SHADER) — реальное небо, а не HUD-оверлей.
 	hb_wood = _hotbar_slot(layer, Vector2(vp.x * 0.5 - 96, vp.y - 96), Color(0.5, 0.36, 0.2), "Дрова")
 	hb_herbs = _hotbar_slot(layer, Vector2(vp.x * 0.5 + 8, vp.y - 96), Color(0.25, 0.5, 0.22), "Травы")
 	done_label = Label.new()
@@ -2750,9 +2809,6 @@ func _process(delta: float) -> void:
 		tutorial_label.modulate.a = clampf(_tut_t / 3.0, 0.0, 1.0)
 		if _tut_t <= 0.0:
 			tutorial_label.visible = false
-	for i in star_dots.size():   # мерцание звёзд
-		var s: ColorRect = star_dots[i]
-		s.modulate.a = 0.6 + 0.4 * sin(clock * 2.2 + i * 1.7)
 	_update_radar()
 	_update_beacons()
 	_refresh_hud()
@@ -2829,10 +2885,11 @@ func _day_night() -> void:
 	sun.rotation_degrees = Vector3(lerpf(-8.0, -172.0, t), -40, 0)
 	# плавный коэффициент ночи (0 днём → 1 в глубокой ночи)
 	var nf := clampf(smoothstep(0.48, 0.58, t) - smoothstep(0.92, 1.0, t), 0.0, 1.0)
+	if sky_mat != null:
+		sky_mat.set_shader_parameter("nf", nf)   # небо темнеет + проявляются звёзды/луна через шейдер
 	sun.light_energy = lerpf(1.2, 0.08, nf)
 	sun.shadow_enabled = (not _mobile) and (nf < 0.5)   # на телефоне тени выкл; ночью солнце за горизонтом → тоже выкл
 	env.ambient_light_energy = lerpf(0.40, 0.12, nf)   # день: ниже заливающий свет → объёмнее, не «прожектор»
-	env.background_energy_multiplier = lerpf(1.0, 0.22, nf)   # затемнить само небо ночью (BG_SKY не темнел → было светло)
 	env.fog_density = lerpf(0.013, 0.042, nf) + sin(clock * 0.15) * 0.0025   # день: меньше белёсой дымки
 	env.fog_height_density = lerpf(0.0, 0.07, nf)   # ночью — стелющийся туман у земли (хоррор)
 	env.fog_light_color = Color(0.70, 0.74, 0.74).lerp(Color(0.18, 0.21, 0.30), nf)   # глубже/холоднее/темнее ночью
@@ -2852,8 +2909,6 @@ func _day_night() -> void:
 	for tm in tk_mats:                                 # эмиссию почти убрать (она и давала «белый»)
 		var sm: StandardMaterial3D = tm
 		sm.emission_energy_multiplier = lerpf(0.0, 0.04, nf)
-	if moon_hud != null:                               # HUD-луна проявляется ночью
-		moon_hud.modulate.a = clampf(nf, 0.0, 1.0)
 	if snd_crickets != null:                           # сверчки слышны ночью
 		snd_crickets.volume_db = lerpf(-60.0, -30.0, nf)
 	for wm in window_mats:                              # окна избы теплеют и светятся ночью
@@ -3182,7 +3237,7 @@ func _check_catch() -> void:
 
 func _hide_gameplay_hud() -> void:
 	# финальный экран (победа/проигрыш) — прячем игровой HUD/контролы, оставляя только итог
-	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, moon_hud, crosshair, tutorial_label, done_label]:
+	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, crosshair, tutorial_label, done_label]:
 		if n != null:
 			n.visible = false
 	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
