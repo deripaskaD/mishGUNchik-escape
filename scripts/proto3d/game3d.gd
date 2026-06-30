@@ -1358,6 +1358,19 @@ func _build_forest() -> void:
 		if Vector2(x, z).length() < CLEARING or (z > WORLD - 42.0 and abs(x) < 55.0):
 			continue
 		_rock(Vector3(x, 0, z), rng.randf_range(0.6, 2.4))
+	# группы валунов (естественные россыпи)
+	for i in (5 if _mobile else 14):
+		var rcx := rng.randf_range(-WORLD + 12, WORLD - 12)
+		var rcz := rng.randf_range(-WORLD + 12, WORLD - 12)
+		if Vector2(rcx, rcz).length() < CLEARING + 4.0 or (rcz > WORLD - 42.0 and abs(rcx) < 55.0) or _on_path(rcx, rcz):
+			continue
+		var near_h := false
+		for h in HUTS:
+			if Vector2(rcx - h.x, rcz - h.z).length() < 9.0:
+				near_h = true
+				break
+		if not near_h:
+			_rock_cluster(rcx, rcz, rng)
 	# кусты-подлесок (разнообразие)
 	for i in (70 if _mobile else 190):
 		var bx := rng.randf_range(-WORLD + 6, WORLD - 6)
@@ -1498,6 +1511,21 @@ func _rock(pos: Vector3, s: float) -> void:
 	cs.position = Vector3(0, 0.4 * s, 0)
 	body.add_child(cs)
 	add_child(body)
+
+func _rock_cluster(cx: float, cz: float, rng: RandomNumberGenerator) -> void:
+	# группа валунов: один крупный с коллайдером + мелкие декоративные камни без коллайдера
+	_rock(Vector3(cx, 0, cz), rng.randf_range(1.5, 2.6))
+	if _rock_scenes.is_empty():
+		return
+	for j in rng.randi_range(2, 4):
+		var m: Node3D = _rock_scenes[rng.randi() % _rock_scenes.size()].instantiate()
+		var ms := rng.randf_range(0.3, 0.8) * 1.4
+		m.scale = Vector3(ms, ms, ms)
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(1.0, 3.2)
+		m.position = Vector3(cx + cos(a) * r, 0, cz + sin(a) * r)
+		m.rotation.y = rng.randf() * TAU
+		add_child(m)
 
 func _build_water_and_yacht() -> void:
 	var water := MeshInstance3D.new()
