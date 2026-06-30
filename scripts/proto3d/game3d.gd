@@ -2253,8 +2253,9 @@ func _build_touch() -> void:
 	joy_knob.position = joy_base.position + joy_base.size * 0.5 - joy_knob.size * 0.5
 	joy_knob.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(joy_knob)
-	_touch_button(root, "БЕГ", Vector2(vp.x - 210, vp.y - 290), Vector2(160, 95), true)
-	_touch_button(root, "ПРЫЖОК", Vector2(vp.x - 210, vp.y - 180), Vector2(160, 95), false)
+	# прижаты к низу-справа (на телефоне в зоне большого пальца при любой высоте экрана)
+	_touch_button(root, "БЕГ", Vector2(vp.x - 185, vp.y - 215), Vector2(165, 88), true)
+	_touch_button(root, "ПРЫЖОК", Vector2(vp.x - 185, vp.y - 117), Vector2(165, 88), false)
 
 func _touch_button(root: Control, text: String, pos: Vector2, size: Vector2, is_sprint: bool) -> void:
 	var b := Button.new()
