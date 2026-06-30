@@ -122,6 +122,10 @@ var fire_light: OmniLight3D
 var mill_blades: Node3D
 var danger_overlay: ColorRect
 var vignette: ColorRect   # затемнение краёв экрана, усиливается с близостью Мишганчика ночью (хоррор)
+# ── коронная сцена-погоня: финальный рывок к яхте, когда все дела готовы ──
+var final_chase := false
+var chase_banner: Label
+var _chase_started := false
 
 # хотбар ресурсов
 var hb_wood: Label
@@ -362,6 +366,14 @@ func _ready() -> void:
 	if "--shotjs" in args:
 		_shot = true
 		_jumpscare(5.0, 1.0, null)   # показать оверлей джампскейра для скриншота
+	if "--shotchase" in args:
+		_shot = true
+		final_chase = true
+		quests_done = quests.size() - 1
+		if chase_banner != null:
+			chase_banner.visible = true
+		timokha.global_position = Vector3(2.0, 1.0, 6.0)   # в кадре перед игроком
+		timokha.look_at(player.global_position, Vector3.UP)
 	if "--shotnote" in args:
 		_shot = true
 		_reveal_note()           # показать всплывающую записку лора
@@ -2450,6 +2462,19 @@ void fragment() {
 	lives_label.add_theme_constant_override("outline_size", 5)
 	lives_label.text = "Жизни: %d" % lives
 	layer.add_child(lives_label)
+	# ── баннер финальной погони ──
+	chase_banner = Label.new()
+	chase_banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	chase_banner.offset_top = vp.y * 0.30
+	chase_banner.offset_bottom = vp.y * 0.30 + 56
+	chase_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chase_banner.add_theme_font_size_override("font_size", 38)
+	chase_banner.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
+	chase_banner.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	chase_banner.add_theme_constant_override("outline_size", 8)
+	chase_banner.text = "БЕГИ К ЯХТЕ — МИШГАНЧИК ГОНИТСЯ!"
+	chase_banner.visible = false
+	layer.add_child(chase_banner)
 	# ── оверлей джампскейра (поверх игрового HUD) ──
 	js_root = Control.new()
 	js_root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -3025,14 +3050,21 @@ func _process(delta: float) -> void:
 	if danger_overlay != null:
 		var dval := 0.0
 		var vstr := 0.42   # базовый кинотон виньетки
-		if _is_night() and wake <= 0.0 and timokha != null:
+		if (_is_night() or final_chase) and wake <= 0.0 and timokha != null:
 			var dd := player.global_position.distance_to(timokha.global_position)
 			if dd < 24.0:
 				dval = (1.0 - dd / 24.0) * 0.30 * (0.75 + 0.25 * sin(clock * 8.0))
 			vstr += clampf(1.0 - dd / 38.0, 0.0, 1.0) * 0.45   # края темнеют сильнее, чем ближе Мишганчик (с 38 м)
+		if final_chase and not won and not lost:
+			dval = maxf(dval, 0.12 + 0.06 * sin(clock * 6.0))   # постоянный тревожный тон в финале
 		danger_overlay.color.a = dval
 		if vignette != null and vignette.material != null:
 			(vignette.material as ShaderMaterial).set_shader_parameter("strength", vstr)
+	if chase_banner != null:
+		var show_banner := final_chase and not won and not lost
+		chase_banner.visible = show_banner
+		if show_banner:
+			chase_banner.modulate.a = 0.7 + 0.3 * sin(clock * 5.0)   # пульс баннера
 	if cam != null:
 		if shake > 0.0:
 			shake = maxf(0.0, shake - delta * 2.2)
@@ -3230,15 +3262,15 @@ func _move_timokha(delta: float) -> void:
 		return   # заморозка для скриншотов (иначе уходит с поставленной точки)
 	# ДНЁМ (и в грейс) — пассивен, бродит у избы (безопасно делать дела).
 	# НОЧЬЮ — охотится: телеграф-рывок, может поймать.
-	var hunting := _is_night() and wake <= 0.0
+	var hunting := (_is_night() and wake <= 0.0) or (final_chase and wake <= 0.0)
 	var target := player.global_position
 	var spd := 0.0
 	if hunting:
-		# НЕОТСТУПНАЯ ОХОТА: ночью Мишганчик всегда знает, где игрок, и бежит к нему (с любого расстояния).
+		# НЕОТСТУПНАЯ ОХОТА: ночью (или в финальной погоне) Мишганчик всегда знает, где игрок.
 		var dist := player.global_position.distance_to(timokha.global_position)
 		last_seen = player.global_position
 		target = player.global_position
-		spd = TIMOKHA_NIGHT
+		spd = TIMOKHA_NIGHT * 1.22 if final_chase else TIMOKHA_NIGHT   # финал — быстрее, нагнетает
 		tk_aggro = _has_los()
 		if _spotted_cd > 0.0:
 			_spotted_cd -= delta
@@ -3432,6 +3464,7 @@ func _update_quests(delta: float) -> void:
 							done_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
 							done_label.text = "Все дела готовы! Чини яхту и беги!"
 							done_t = 2.8
+							_start_final_chase()
 
 func _set_crosshair_size(s: float) -> void:
 	if crosshair == null:
@@ -3489,7 +3522,7 @@ func _update_quest_prompt() -> void:
 		qp_fill.size.x = 220.0 * clampf(float(near_q["prog"]), 0.0, 1.0)
 
 func _check_catch() -> void:
-	if stun > 0.0 or wake > 0.0 or not _is_night():
+	if stun > 0.0 or wake > 0.0 or not (_is_night() or final_chase):
 		return
 	var to := player.global_position - timokha.global_position
 	var dist := Vector2(to.x, to.z).length()
@@ -3574,6 +3607,22 @@ func _jumpscare(dur: float, peak: float, snd: AudioStreamPlayer) -> void:
 		_play(snd)
 	if snd_boom != null and peak >= 0.7:
 		_play(snd_boom)   # мемный «бум» на сильных джампскейрах
+
+func _start_final_chase() -> void:
+	# КОРОННАЯ СЦЕНА: все дела готовы → Мишганчик возникает позади и гонит к яхте
+	if final_chase:
+		return
+	final_chase = true
+	_chase_started = true
+	timokha.global_position = player.global_position + player.global_transform.basis.z * 34.0
+	timokha.global_position.y = 1.0
+	timokha.look_at(player.global_position, Vector3.UP)
+	wake = 0.0
+	_play(snd_stinger)
+	if not _autoplay:
+		_jumpscare(0.5, 1.0, snd_caught)   # драматический скейр на старте финала
+	if chase_banner != null:
+		chase_banner.visible = true
 
 func _hide_gameplay_hud() -> void:
 	# финальный экран (победа/проигрыш) — прячем игровой HUD/контролы, оставляя только итог
