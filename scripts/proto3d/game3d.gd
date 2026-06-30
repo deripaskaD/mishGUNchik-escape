@@ -164,6 +164,12 @@ var journal_btn: Button
 var journal_panel: ColorRect
 var journal_label: Label
 var journal_open := false
+# ── сейв + ежедневная награда/стрик (вовлечение, возвращаемость) ──
+const SAVE_PATH := "user://save.json"
+var streak := 0
+var daily_bonus := 0
+var _save_day := 0
+var _new_daily := false
 var window_mats: Array = []
 var snd_btn: Button
 var _muted := false
@@ -253,6 +259,8 @@ func _ready() -> void:
 		wake = 0.0               # без грейса — ночь-спавн срабатывает сразу
 	if _autoplay:
 		print("[autoplay] start")
+	if not _autoplay:
+		_load_save()   # стрик/бонус-жизни/дневник до постройки HUD
 	_build_materials()
 	_build_environment()
 	_build_ground()
@@ -398,6 +406,10 @@ func _ready() -> void:
 			pause_controls.text = "Управление: левый джойстик — идти · правая зона свайп — камера\nкнопки БЕГ / ПРЫЖОК · кнопка ❚❚ — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
 		else:
 			pause_controls.text = "Управление: WASD — идти · Shift — бег · мышь — осмотр\nSpace — прыжок · Esc — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
+	if _new_daily and done_label != null:
+		done_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
+		done_label.text = "Награда дня! Серия: %d дн.  +%d жизни сегодня" % [streak, daily_bonus]
+		done_t = 4.5
 
 func _mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -2662,6 +2674,7 @@ func _reveal_note() -> void:
 		note_t = 6.5
 	if journal_btn != null:
 		journal_btn.text = "Дневник (%d/%d)" % [lore_found.size(), LORE.size()]
+	_save_game()   # дневник персистентный между сессиями
 
 func _toggle_journal() -> void:
 	if journal_panel == null:
@@ -2679,6 +2692,40 @@ func _toggle_journal() -> void:
 		if journal_label != null:
 			journal_label.text = s
 	journal_panel.visible = journal_open
+
+func _load_save() -> void:
+	var today := int(Time.get_unix_time_from_system() / 86400.0)   # индекс суток
+	var data := {}
+	if FileAccess.file_exists(SAVE_PATH):
+		var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+		if f != null:
+			var parsed: Variant = JSON.parse_string(f.get_as_text())
+			f.close()
+			if parsed is Dictionary:
+				data = parsed
+	streak = int(data.get("streak", 0))
+	daily_bonus = int(data.get("bonus", 0))
+	_save_day = int(data.get("day", 0))
+	lore_idx = clampi(int(data.get("lore", 0)), 0, LORE.size())
+	lore_found.clear()
+	for i in lore_idx:
+		lore_found.append(LORE[i])
+	# ежедневная награда: новый день → стрик и бонус-жизни на сегодня
+	if today > _save_day:
+		streak = (streak + 1) if today == _save_day + 1 else 1
+		daily_bonus = mini(streak, 3)
+		_save_day = today
+		_new_daily = true
+		_save_game()
+	lives = MAX_LIVES + daily_bonus
+
+func _save_game() -> void:
+	if _autoplay or _shot or _shotin:
+		return   # тест/скриншот-режимы не пишут сейв
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx}))
+		f.close()
 
 func _toggle_pause() -> void:
 	paused = not paused
