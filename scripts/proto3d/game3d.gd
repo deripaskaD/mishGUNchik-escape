@@ -192,6 +192,7 @@ var _shotwin := false
 var _shot_t := 0.0
 var _shot_saved := false
 var _dbg_clip := ""   # форс-проигрывание клипа для проверочных кадров (--shotidle/walk/run)
+var _mobile := false   # мобильный режим (телефон/мобильный веб): лёгкая графика + тач
 
 func _ready() -> void:
 	var args := OS.get_cmdline_args() + OS.get_cmdline_user_args()
@@ -199,6 +200,7 @@ func _ready() -> void:
 	_shotin = "--shotin" in args
 	_autoplay = "--autoplay" in args
 	_touch_flag = "--touch" in args
+	_mobile = ("--mobile" in args) or OS.has_feature("web_android") or OS.has_feature("web_ios") or OS.has_feature("mobile")
 	_shothut = "--shothut" in args
 	_shotwin = "--shotwin" in args
 	if "--night" in args:
@@ -417,7 +419,7 @@ func _build_environment() -> void:
 	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -40, 0)
 	sun.light_energy = 1.2
-	sun.shadow_enabled = true
+	sun.shadow_enabled = not _mobile   # на телефоне тени выключены (тяжело)
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS   # дешевле для большого леса
 	sun.directional_shadow_max_distance = 75.0   # тени только вблизи (туман скрывает дальние) → перф ок
 	sun.shadow_blur = 1.5                          # мягче края
@@ -453,7 +455,7 @@ func _build_environment() -> void:
 	env.adjustment_contrast = 1.10
 	env.adjustment_saturation = 1.14
 	# мягкое свечение ярких/эмиссивных поверхностей (огонь/окна/луна/лампа)
-	env.glow_enabled = true
+	env.glow_enabled = not _mobile   # glow выключен на телефоне (перф)
 	env.glow_intensity = 0.45
 	env.glow_strength = 0.9
 	env.glow_bloom = 0.05
@@ -1213,7 +1215,7 @@ func _on_path(x: float, z: float) -> bool:
 func _build_forest() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260627
-	var n := 60 if _autoplay else TREES
+	var n := 60 if _autoplay else (int(TREES / 3) if _mobile else TREES)   # на телефоне втрое меньше деревьев (перф)
 	var placed := 0
 	var attempts := 0
 	while placed < n and attempts < n * 4:
@@ -1245,7 +1247,7 @@ func _build_forest() -> void:
 		_tree(Vector3(x, 0, z), rng.randf_range(0.8, 1.5), rng.randf() < 0.35)
 	# плотная стена леса по периметру — визуальная граница, перекрывает обзор за край
 	if not _autoplay:
-		for i in BORDER_TREES:
+		for i in (int(BORDER_TREES / 3) if _mobile else BORDER_TREES):
 			var bx := 0.0
 			var bz := 0.0
 			if rng.randf() < 0.5:
@@ -1857,7 +1859,7 @@ func _add_quest(id: String, pos: Vector3, label: String, kind: String) -> void:
 
 func _build_rain() -> void:
 	rain = GPUParticles3D.new()
-	rain.amount = 900
+	rain.amount = 200 if _mobile else 900   # меньше капель на телефоне
 	rain.lifetime = 1.2
 	rain.local_coords = false
 	rain.position = Vector3(0, 16, 0)
@@ -2220,7 +2222,7 @@ func _hotbar_slot(layer: CanvasLayer, pos: Vector2, col: Color, name: String) ->
 func _build_touch() -> void:
 	# На web is_touchscreen_available() часто врёт (true на десктопе) → показывал тач-джойстик вместо WASD/мыши.
 	# На web по умолчанию десктоп-управление (клавиатура+мышь); тач — только нативный мобайл или флаг --touch.
-	show_touch = _touch_flag or (DisplayServer.is_touchscreen_available() and not OS.has_feature("web"))
+	show_touch = _touch_flag or _mobile or (DisplayServer.is_touchscreen_available() and not OS.has_feature("web"))
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	var root := Control.new()
@@ -2574,7 +2576,7 @@ func _day_night() -> void:
 	# плавный коэффициент ночи (0 днём → 1 в глубокой ночи)
 	var nf := clampf(smoothstep(0.48, 0.58, t) - smoothstep(0.92, 1.0, t), 0.0, 1.0)
 	sun.light_energy = lerpf(1.2, 0.08, nf)
-	sun.shadow_enabled = nf < 0.5   # ночью солнце уходит за горизонт → тени вырождаются/мерцают; отключаем (луна теней не даёт)
+	sun.shadow_enabled = (not _mobile) and (nf < 0.5)   # на телефоне тени выкл; ночью солнце за горизонтом → тоже выкл
 	env.ambient_light_energy = lerpf(0.55, 0.12, nf)
 	env.background_energy_multiplier = lerpf(1.0, 0.22, nf)   # затемнить само небо ночью (BG_SKY не темнел → было светло)
 	env.fog_density = lerpf(0.020, 0.042, nf) + sin(clock * 0.15) * 0.0025   # гуще ночью + медленное «дыхание»
@@ -2603,13 +2605,14 @@ func _move_player(delta: float) -> void:
 	var fb := 0.0
 	var lr := 0.0
 	if stun <= 0.0 and not (_shot or _shotin):
-		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		# физические клавиши — работают при любой раскладке (рус. раскладка ломала is_key_pressed: W→Ц)
+		if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
 			fb += 1.0
-		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		if Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
 			fb -= 1.0
-		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		if Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
 			lr += 1.0
-		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		if Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 			lr -= 1.0
 		if touch_move.length() > 0.1:
 			lr += touch_move.x
@@ -2623,13 +2626,13 @@ func _move_player(delta: float) -> void:
 	if move.length() > 1.0:
 		move = move.normalized()
 	var spd := SPEED
-	if Input.is_key_pressed(KEY_SHIFT) or touch_sprint:
+	if Input.is_physical_key_pressed(KEY_SHIFT) or touch_sprint:
 		spd = SPRINT
 	var vy := player.velocity.y - GRAVITY * delta
 	if player.is_on_floor():
 		if vy < 0.0:
 			vy = -1.0
-		if stun <= 0.0 and (Input.is_key_pressed(KEY_SPACE) or touch_jump):
+		if stun <= 0.0 and (Input.is_physical_key_pressed(KEY_SPACE) or touch_jump):
 			vy = JUMP
 	player.velocity = Vector3(move.x * spd, vy, move.z * spd)
 	player.move_and_slide()
