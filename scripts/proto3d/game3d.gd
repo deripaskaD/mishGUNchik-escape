@@ -34,6 +34,7 @@ var moon: DirectionalLight3D
 var env: Environment
 var rain: GPUParticles3D
 var fireflies: CPUParticles3D   # светлячки вокруг игрока ночью (атмосфера)
+var pollen: CPUParticles3D      # пыльца/споры в воздухе днём (атмосфера)
 var hud: Label
 var snd_rain: AudioStreamPlayer
 var snd_heart: AudioStreamPlayer
@@ -1654,6 +1655,36 @@ func _make_player() -> void:
 		fireflies.material_override = fmat
 		fireflies.emitting = false
 		player.add_child(fireflies)
+		# пыльца/споры в воздухе днём — мягкие светлые пылинки (см. _day_night)
+		pollen = CPUParticles3D.new()
+		pollen.position = Vector3(0, 1.6, 0)
+		pollen.local_coords = false
+		pollen.amount = 10 if _mobile else 30
+		pollen.lifetime = 6.0
+		pollen.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		pollen.emission_box_extents = Vector3(9, 3.0, 9)
+		pollen.gravity = Vector3(0.15, -0.05, 0.1)   # почти парят, лёгкий снос
+		pollen.direction = Vector3(0, 0, 0)
+		pollen.spread = 180.0
+		pollen.initial_velocity_min = 0.05
+		pollen.initial_velocity_max = 0.25
+		var pmesh := QuadMesh.new()
+		pmesh.size = Vector2(0.045, 0.045)
+		pollen.mesh = pmesh
+		var pgrad := Gradient.new()
+		pgrad.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+		pgrad.colors = PackedColorArray([Color(1.0, 0.98, 0.85, 0.0), Color(1.0, 0.98, 0.85, 0.5), Color(1.0, 0.98, 0.85, 0.0)])
+		pollen.color_ramp = pgrad
+		var pmat := StandardMaterial3D.new()
+		pmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		pmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		pmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		pmat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		pmat.vertex_color_use_as_albedo = true
+		pmat.albedo_color = Color(1.0, 0.98, 0.85)
+		pollen.material_override = pmat
+		pollen.emitting = false
+		player.add_child(pollen)
 
 func _small_sphere(pos: Vector3, r: float, col: Color) -> void:
 	var m := MeshInstance3D.new()
@@ -2718,6 +2749,10 @@ func _day_night() -> void:
 		var fly := nf > 0.3
 		if fireflies.emitting != fly:
 			fireflies.emitting = fly
+	if pollen != null:                                 # пыльца только днём
+		var dayp := nf < 0.3
+		if pollen.emitting != dayp:
+			pollen.emitting = dayp
 	if tk_glow != null:                                # мягкая фронтальная подсветка ночью → видна текстура, без пересвета/bloom
 		tk_glow.light_energy = lerpf(0.0, 1.0, nf)
 	for tm in tk_mats:                                 # эмиссию почти убрать (она и давала «белый»)
