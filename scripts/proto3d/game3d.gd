@@ -753,9 +753,49 @@ func _scatter_models(names: Array, pos: Vector3, count: int, rmin: float, rmax: 
 		m.rotation.y = rng.randf() * TAU
 		add_child(m)
 
+func _scatter_global(names: Array, count: int, scl: float) -> void:
+	# мелкая флора по ВСЕЙ карте (жизнь): обходит поляну/тропы/хижины/озеро/ориентиры
+	var scenes: Array = []
+	for n in names:
+		var p := "res://art/models/nature/%s.glb" % n
+		if ResourceLoader.exists(p):
+			scenes.append(load(p))
+	if scenes.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var placed := 0
+	var attempts := 0
+	while placed < count and attempts < count * 5:
+		attempts += 1
+		var x := rng.randf_range(-WORLD + 8, WORLD - 8)
+		var z := rng.randf_range(-WORLD + 8, WORLD - 8)
+		if Vector2(x, z).length() < CLEARING:
+			continue
+		if z > WORLD - 42.0 and abs(x) < 55.0:
+			continue
+		if _on_path(x, z):
+			continue
+		var skip := false
+		for h in HUTS:
+			if Vector2(x - h.x, z - h.z).length() < 7.0:
+				skip = true
+				break
+		if skip:
+			continue
+		placed += 1
+		var m: Node3D = scenes[rng.randi() % scenes.size()].instantiate()
+		var s := scl * rng.randf_range(0.7, 1.4)
+		m.scale = Vector3(s, s, s)
+		m.position = Vector3(x, 0, z)
+		m.rotation.y = rng.randf() * TAU
+		add_child(m)
+
 func _ground_detail() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 909
+	# глобальная флора по всей карте (цветы/трава/грибы) — оживляет лес
+	_scatter_global(["flower_redB", "flower_yellowB", "flower_purpleB", "grass_leafs", "mushroom_tan", "mushroom_red"], 55 if _mobile else 170, 1.5)
 	# грибы у квеста «грибы»
 	_scatter_models(["mushroom_red", "mushroom_redGroup", "mushroom_tan", "mushroom_tanGroup"], Vector3(-60, 0, -185), 12, 2.0, 7.0, 2.6, rng)
 	# цветы/трава у квестов с травами
