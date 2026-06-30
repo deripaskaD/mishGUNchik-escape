@@ -52,6 +52,8 @@ var snd_owl: AudioStreamPlayer
 var _owl_t := 8.0
 var snd_thunder: AudioStreamPlayer
 var snd_dread: AudioStreamPlayer
+var snd_boom: AudioStreamPlayer
+var snd_spotted: AudioStreamPlayer
 var light_flash: ColorRect
 var _light_v := 0.0
 var _lightning_t := 14.0
@@ -65,6 +67,8 @@ var wander_t := 0.0
 var wander_dir := Vector3.ZERO
 var tk_state := "сон"
 var tk_aggro := false   # видит игрока в упор (для красного прицела/угрозы)
+var _was_aggro := false   # для детекта момента «только что заметил» → мемный гудок
+var _spotted_cd := 0.0
 var tk_stuck_t := 0.0   # сколько застрял (уперся и не продвигается)
 var tk_detour_t := 0.0  # таймер обхода препятствия
 var tk_detour := Vector3.ZERO   # направление обхода (вбок)
@@ -3189,6 +3193,12 @@ func _move_timokha(delta: float) -> void:
 		target = player.global_position
 		spd = TIMOKHA_NIGHT
 		tk_aggro = _has_los()
+		if _spotted_cd > 0.0:
+			_spotted_cd -= delta
+		if tk_aggro and not _was_aggro and _spotted_cd <= 0.0 and not _autoplay and snd_spotted != null:
+			_play(snd_spotted)   # мемный гудок «заметил тебя» (на фронте обнаружения)
+			_spotted_cd = 5.0
+		_was_aggro = tk_aggro
 		var close := dist < 16.0 and tk_aggro   # рывок-телеграф только вблизи и при прямой видимости
 		if close:
 			if not _tele and not _dash:
@@ -3515,6 +3525,8 @@ func _jumpscare(dur: float, peak: float, snd: AudioStreamPlayer) -> void:
 	js_root.modulate.a = peak
 	if snd != null:
 		_play(snd)
+	if snd_boom != null and peak >= 0.7:
+		_play(snd_boom)   # мемный «бум» на сильных джампскейрах
 
 func _hide_gameplay_hud() -> void:
 	# финальный экран (победа/проигрыш) — прячем игровой HUD/контролы, оставляя только итог
@@ -3653,6 +3665,8 @@ func _build_audio() -> void:
 	snd_owl = _make_audio_player(_load_wav("owl", false), -16.0)
 	snd_thunder = _make_audio_player(_load_wav("thunder", false), -7.0)
 	snd_dread = _make_audio_player(_load_wav("dread", true), -60.0)   # громкость рулится в _audio_tick (саспенс)
+	snd_boom = _make_audio_player(_load_wav("boom", false), -2.0)     # мемный «вайн-бум» на джампскейрах
+	snd_spotted = _make_audio_player(_load_wav("honk", false), -6.0)  # дурацкий гудок «заметил тебя»
 	if snd_rain.stream != null:
 		snd_rain.play()
 	if snd_wind != null and snd_wind.stream != null:

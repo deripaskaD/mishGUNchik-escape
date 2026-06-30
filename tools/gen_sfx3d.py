@@ -219,4 +219,40 @@ def dread(dur=10.0, vol=0.5):
 
 # нарастающий саспенс-дрон (громкость рулится из игры по близости Мишганчика и прогрессу)
 write("dread", dread(10.0, 0.5))
+
+
+def boom(dur=1.1, vol=0.95):
+    """Мемный «вайн-бум»: резкий низкий удар с быстрым падением частоты в саб + сатурация. Звук джампскейра."""
+    n = int(SR * dur)
+    o = []
+    for i in range(n):
+        t = i / SR
+        f = 130.0 * math.exp(-3.2 * t) + 37.0          # частота быстро падает в саб-бас
+        s = math.sin(2 * math.pi * f * t)
+        s += 0.45 * math.sin(2 * math.pi * f * 0.5 * t)  # суб-октава
+        s = math.tanh(s * 1.7)                           # мягкая сатурация → «бум»
+        env = math.exp(-3.0 * t) * (1.0 - math.exp(-120.0 * t))  # резкая атака, быстрый спад
+        o.append(s * env * vol)
+    return o
+
+
+# мемный «бум» на джампскейрах
+write("boom", boom(1.1, 0.95))
+
+
+def honk(dur=0.55, vol=0.6):
+    """Дурацкий гудок-honk (мемно): квадрат-волна с падающей частотой. Когда Мишганчик заметил игрока."""
+    n = int(SR * dur)
+    o = []
+    for i in range(n):
+        t = i / SR
+        f = 420.0 * math.exp(-1.6 * t) + 170.0
+        sq = 1.0 if math.sin(2 * math.pi * f * t) > 0 else -1.0   # квадрат = «honky»
+        env = math.exp(-2.6 * t) * (1.0 - math.exp(-90.0 * t))
+        o.append(sq * env * vol * 0.5)
+    return o
+
+
+# дурацкий гудок «заметил тебя»
+write("honk", honk(0.55, 0.6))
 print("done")
