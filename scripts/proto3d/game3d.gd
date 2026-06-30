@@ -114,6 +114,7 @@ var bob_amt := 0.0
 var fire_light: OmniLight3D
 var mill_blades: Node3D
 var danger_overlay: ColorRect
+var vignette: ColorRect   # затемнение краёв экрана, усиливается с близостью Мишганчика ночью (хоррор)
 
 # хотбар ресурсов
 var hb_wood: Label
@@ -296,10 +297,11 @@ func _ready() -> void:
 		_lightning_t = 999.0
 	if "--shotdark" in args:
 		_shot = true
-		clock = DAY_LEN * 0.72   # ночь визуально (nf=1) — проверка модели/свечения ночью
-		wake = 999.0             # без ночного телепорта/охоты: модель остаётся в кадре
-		timokha.global_position = Vector3(1.0, 1.0, 9.0)   # перед игроком для осмотра модели ночью
-		timokha.look_at(player.global_position, Vector3.UP)   # как в погоне → проверка, что лицом к игроку
+		clock = DAY_LEN * 0.72   # ночь визуально (nf=1)
+		wake = 0.0               # ночная охота активна (для danger/виньетки)
+		_was_night = true        # подавить телепорт-спавн — модель остаётся в кадре близко
+		timokha.global_position = Vector3(1.0, 1.0, 9.0)   # близко перед игроком (ночная встреча)
+		timokha.look_at(player.global_position, Vector3.UP)
 	for _p in [["--shotidle", "idle"], ["--shotwalk", "walk"], ["--shotrun", "run"]]:
 		if _p[0] in args:
 			_shot = true
@@ -1889,22 +1891,24 @@ func _build_rain() -> void:
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
-	# постоянная виньетка по краям (кинематографично-хоррорный тон)
-	var vig := ColorRect.new()
-	vig.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vig.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# виньетка по краям: базовый кинотон + усиление с близостью Мишганчика ночью (хоррор)
+	vignette = ColorRect.new()
+	vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var vsh := Shader.new()
 	vsh.code = """shader_type canvas_item;
+uniform float strength : hint_range(0.0, 1.0) = 0.42;
 void fragment() {
-	float d = distance(UV, vec2(0.5));
-	float v = smoothstep(0.52, 0.95, d) * 0.42;
+	float r = distance(UV, vec2(0.5)) * 1.32;
+	float v = smoothstep(0.42, 0.95, r) * strength;
 	COLOR = vec4(0.0, 0.0, 0.0, v);
 }
 """
 	var vmat := ShaderMaterial.new()
 	vmat.shader = vsh
-	vig.material = vmat
-	layer.add_child(vig)
+	vmat.set_shader_parameter("strength", 0.42)
+	vignette.material = vmat
+	layer.add_child(vignette)
 	danger_overlay = ColorRect.new()
 	danger_overlay.color = Color(0.8, 0.05, 0.05, 0.0)
 	danger_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -2457,11 +2461,15 @@ func _process(delta: float) -> void:
 		done_label.modulate.a = clampf(done_t, 0.0, 1.0)
 	if danger_overlay != null:
 		var dval := 0.0
+		var vstr := 0.42   # базовый кинотон виньетки
 		if _is_night() and wake <= 0.0 and timokha != null:
 			var dd := player.global_position.distance_to(timokha.global_position)
 			if dd < 24.0:
 				dval = (1.0 - dd / 24.0) * 0.30 * (0.75 + 0.25 * sin(clock * 8.0))
+			vstr += clampf(1.0 - dd / 38.0, 0.0, 1.0) * 0.45   # края темнеют сильнее, чем ближе Мишганчик (с 38 м)
 		danger_overlay.color.a = dval
+		if vignette != null and vignette.material != null:
+			(vignette.material as ShaderMaterial).set_shader_parameter("strength", vstr)
 	if cam != null:
 		if shake > 0.0:
 			shake = maxf(0.0, shake - delta * 2.2)
