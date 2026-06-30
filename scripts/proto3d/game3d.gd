@@ -166,6 +166,11 @@ var _muted := false
 var _yacht_announced := false
 var restart_btn: Button
 var win_quit_btn: Button
+const MAX_LIVES := 3
+var lives := MAX_LIVES
+var lives_label: Label
+var revive_btn: Button
+var _revived := false   # воскрешение «за рекламу» доступно один раз за забег (заглушка)
 var win_overlay: ColorRect
 var win_label: Label
 
@@ -2408,6 +2413,14 @@ void fragment() {
 	catch_label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	catch_label.add_theme_constant_override("outline_size", 4)
 	layer.add_child(catch_label)
+	lives_label = Label.new()
+	lives_label.position = Vector2(16, 64)
+	lives_label.add_theme_font_size_override("font_size", 20)
+	lives_label.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45))
+	lives_label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	lives_label.add_theme_constant_override("outline_size", 5)
+	lives_label.text = "Жизни: %d" % lives
+	layer.add_child(lives_label)
 	# квест-зона: компас к цели + прогресс текущего дела (верх-центр, под счётчиком)
 	quest_panel = Label.new()
 	quest_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -2494,6 +2507,15 @@ void fragment() {
 	restart_btn.visible = false
 	restart_btn.pressed.connect(_restart_game)
 	layer.add_child(restart_btn)
+	revive_btn = Button.new()
+	revive_btn.text = "Воскреснуть (реклама)"
+	revive_btn.size = Vector2(300, 60)
+	revive_btn.position = Vector2(vp.x * 0.5 - 150, vp.y - 230)
+	revive_btn.add_theme_font_size_override("font_size", 22)
+	revive_btn.add_theme_color_override("font_color", Color(1.0, 0.92, 0.5))
+	revive_btn.visible = false
+	revive_btn.pressed.connect(_revive)
+	layer.add_child(revive_btn)
 	win_quit_btn = Button.new()
 	win_quit_btn.text = "Выход"
 	win_quit_btn.size = Vector2(250, 60)
@@ -3367,32 +3389,81 @@ func _check_catch() -> void:
 	var to := player.global_position - timokha.global_position
 	if Vector2(to.x, to.z).length() < CATCH_DIST:
 		caught += 1
-		if _autoplay:
-			# тест-харнесс: не game-over, а отброс Мишганчика далеко + короткая передышка,
-			# чтобы автоплей мог измерить ПОЛНУЮ петлю (для игрока поимка = проигрыш, ниже)
-			var ang := randf() * TAU
-			timokha.global_position = player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 52.0
-			wake = 4.0
-			return
-		lost = true                       # поймал → проигрыш (game over → рестарт)
 		_play(snd_caught)
 		_play(snd_laugh)                  # комичный смех Мишганчика вдогонку
 		if catch_flash != null:
 			catch_flash.color = Color(1.0, 0.1, 0.1, 0.0)
 		flash_v = 1.0
 		shake = 0.7
-		player.velocity = Vector3.ZERO
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # курсор для кнопок экрана проигрыша
+		if _autoplay:
+			# тест-харнесс: отброс Мишганчика далеко, измеряем полную петлю
+			var ang := randf() * TAU
+			timokha.global_position = player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 52.0
+			wake = 4.0
+			return
+		lives -= 1
+		if lives > 0:
+			# мягкий проигрыш: быстрый респаун у избы, передышка — петля продолжается (детям не обидно)
+			_soft_respawn()
+			if done_label != null:
+				done_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.45))
+				done_label.text = "Мишганчик схватил! Жизней осталось: %d" % lives
+				done_t = 2.2
+		else:
+			lost = true                   # жизни кончились → экран конца (воскрешение/рестарт)
+			player.velocity = Vector3.ZERO
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func _soft_respawn() -> void:
+	# вернуть игрока к избе, Мишганчика отбросить, дать короткую неуязвимость
+	player.global_position = Vector3(0, 1.0, 16)
+	player.velocity = Vector3.ZERO
+	var ang := randf() * TAU
+	timokha.global_position = player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 60.0
+	wake = 3.5            # передышка: ночная охота не ловит, пока добегаешь до укрытия
+	if lives_label != null:
+		lives_label.text = "Жизни: %d" % lives
+
+func _revive() -> void:
+	# «воскрешение за рекламу» — ЗАГЛУШКА: реальный рекламный SDK подключает пользователь.
+	# Сейчас просто восстанавливает забег один раз (без показа рекламы).
+	_revived = true
+	lost = false
+	lives = 1
+	_soft_respawn()
+	if win_overlay != null:
+		win_overlay.visible = false
+	if win_label != null:
+		win_label.visible = false
+	if restart_btn != null:
+		restart_btn.visible = false
+	if win_quit_btn != null:
+		win_quit_btn.visible = false
+	if revive_btn != null:
+		revive_btn.visible = false
+	_show_gameplay_hud()
+	if not (_shot or _shotin):
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _hide_gameplay_hud() -> void:
 	# финальный экран (победа/проигрыш) — прячем игровой HUD/контролы, оставляя только итог
-	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, crosshair, tutorial_label, done_label]:
+	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, lives_label, crosshair, tutorial_label, done_label]:
 		if n != null:
 			n.visible = false
 	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
 		(hb_wood.get_parent() as CanvasItem).visible = false
 	if hb_herbs != null and hb_herbs.get_parent() is CanvasItem:
 		(hb_herbs.get_parent() as CanvasItem).visible = false
+
+func _show_gameplay_hud() -> void:
+	# вернуть игровой HUD (после воскрешения)
+	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_panel, crosshair, lives_label]:
+		if n != null:
+			n.visible = true
+	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
+		(hb_wood.get_parent() as CanvasItem).visible = true
+	if hb_herbs != null and hb_herbs.get_parent() is CanvasItem:
+		(hb_herbs.get_parent() as CanvasItem).visible = true
 
 func _refresh_hud() -> void:
 	if hud == null:
@@ -3407,6 +3478,8 @@ func _refresh_hud() -> void:
 	if catch_label != null:
 		catch_label.text = "Поймали: %d" % caught
 		catch_label.visible = caught > 0
+	if lives_label != null:
+		lives_label.text = "Жизни: %d" % lives
 	_update_quest_prompt()
 	if lost:
 		hud.text = ""
@@ -3415,7 +3488,9 @@ func _refresh_hud() -> void:
 			win_overlay.visible = true
 			win_label.visible = true
 			win_label.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
-			win_label.text = "МИШГАНЧИК ПОЙМАЛ ТЕБЯ!\n\nПродержался ночей: %d · дел: %d/%d\n\nПопробуй снова" % [nights, quests_done, quests.size()]
+			win_label.text = "МИШГАНЧИК ПОЙМАЛ ТЕБЯ!\n\nПродержался ночей: %d · дел: %d/%d" % [nights, quests_done, quests.size()]
+		if revive_btn != null:
+			revive_btn.visible = not _revived   # воскрешение «за рекламу» — один раз за забег
 		if restart_btn != null:
 			restart_btn.visible = true
 		if win_quit_btn != null:
