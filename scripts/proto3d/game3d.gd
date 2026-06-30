@@ -3163,6 +3163,13 @@ func _check_catch() -> void:
 	var to := player.global_position - timokha.global_position
 	if Vector2(to.x, to.z).length() < CATCH_DIST:
 		caught += 1
+		if _autoplay:
+			# тест-харнесс: не game-over, а отброс Мишганчика далеко + короткая передышка,
+			# чтобы автоплей мог измерить ПОЛНУЮ петлю (для игрока поимка = проигрыш, ниже)
+			var ang := randf() * TAU
+			timokha.global_position = player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 52.0
+			wake = 4.0
+			return
 		lost = true                       # поймал → проигрыш (game over → рестарт)
 		_play(snd_caught)
 		_play(snd_laugh)                  # комичный смех Мишганчика вдогонку
