@@ -836,6 +836,67 @@ func _scatter_clumps(names: Array, clumps: int, per_clump: int, radius: float, s
 			m.rotation.y = rng.randf() * TAU
 			add_child(m)
 
+func _log_clusters(count: int) -> void:
+	# «лёжки» — упавшее бревно с грибами/травой вокруг (естественный валежник)
+	var logs: Array = []
+	for n in ["log", "log_large"]:
+		var p := "res://art/models/nature/%s.glb" % n
+		if ResourceLoader.exists(p):
+			logs.append(load(p))
+	if logs.is_empty():
+		return
+	var deco: Array = []
+	for n in ["mushroom_tan", "mushroom_tanGroup", "mushroom_red", "grass_leafs"]:
+		var dp := "res://art/models/nature/%s.glb" % n
+		if ResourceLoader.exists(dp):
+			deco.append(load(dp))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var placed := 0
+	var attempts := 0
+	while placed < count and attempts < count * 6:
+		attempts += 1
+		var cx := rng.randf_range(-WORLD + 8, WORLD - 8)
+		var cz := rng.randf_range(-WORLD + 8, WORLD - 8)
+		if Vector2(cx, cz).length() < CLEARING + 4.0 or (cz > WORLD - 42.0 and abs(cx) < 55.0) or _on_path(cx, cz):
+			continue
+		var skip := false
+		for h in HUTS:
+			if Vector2(cx - h.x, cz - h.z).length() < 8.0:
+				skip = true
+				break
+		if skip:
+			continue
+		placed += 1
+		var axis := rng.randf() * TAU   # ось лежащего бревна
+		# основное бревно
+		var lm: Node3D = logs[rng.randi() % logs.size()].instantiate()
+		var lsc := rng.randf_range(1.8, 2.6)
+		lm.scale = Vector3(lsc, lsc, lsc)
+		lm.position = Vector3(cx, 0, cz)
+		lm.rotation.y = axis
+		add_child(lm)
+		# иногда — обломок поменьше рядом, вдоль той же оси
+		if rng.randf() < 0.6:
+			var lm2: Node3D = logs[rng.randi() % logs.size()].instantiate()
+			var lsc2 := rng.randf_range(1.0, 1.6)
+			lm2.scale = Vector3(lsc2, lsc2, lsc2)
+			var off := rng.randf_range(1.6, 2.8)
+			lm2.position = Vector3(cx + cos(axis) * off, 0, cz + sin(axis) * off)
+			lm2.rotation.y = axis + rng.randf_range(-0.4, 0.4)
+			add_child(lm2)
+		# грибы/трава, проросшие у гнилого бревна
+		if not deco.is_empty():
+			for j in rng.randi_range(2, 4):
+				var dm: Node3D = deco[rng.randi() % deco.size()].instantiate()
+				var ds := rng.randf_range(1.4, 2.2)
+				dm.scale = Vector3(ds, ds, ds)
+				var da := rng.randf() * TAU
+				var dr := rng.randf_range(0.4, 1.6)
+				dm.position = Vector3(cx + cos(da) * dr, 0, cz + sin(da) * dr)
+				dm.rotation.y = rng.randf() * TAU
+				add_child(dm)
+
 func _ground_detail() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 909
@@ -843,6 +904,8 @@ func _ground_detail() -> void:
 	_scatter_global(["flower_redB", "flower_yellowB", "flower_purpleB", "grass_leafs", "mushroom_tan", "mushroom_red"], 55 if _mobile else 170, 1.5)
 	# кучки подлеска (трава + мелкие кусты) — плотные пятна
 	_scatter_clumps(["grass_leafs", "plant_bushSmall", "flower_yellowB"], 22 if _mobile else 65, 4, 2.6, 1.4)
+	# валежник — упавшие брёвна с грибами/травой вокруг
+	_log_clusters(8 if _mobile else 20)
 	# грибы у квеста «грибы»
 	_scatter_models(["mushroom_red", "mushroom_redGroup", "mushroom_tan", "mushroom_tanGroup"], Vector3(-60, 0, -185), 12, 2.0, 7.0, 2.6, rng)
 	# цветы/трава у квестов с травами
