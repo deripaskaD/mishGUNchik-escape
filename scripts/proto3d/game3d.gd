@@ -62,6 +62,10 @@ var wander_t := 0.0
 var wander_dir := Vector3.ZERO
 var tk_state := "сон"
 var tk_aggro := false   # видит игрока в упор (для красного прицела/угрозы)
+var tk_stuck_t := 0.0   # сколько застрял (уперся и не продвигается)
+var tk_detour_t := 0.0  # таймер обхода препятствия
+var tk_detour := Vector3.ZERO   # направление обхода (вбок)
+var tk_lastpos := Vector3.ZERO  # позиция в прошлом кадре (детект застревания)
 var _was_night := false
 var tk_legs: Array = []
 var tk_arms: Array = []
@@ -419,6 +423,7 @@ func _build_environment() -> void:
 	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -40, 0)
 	sun.light_energy = 1.2
+	sun.light_color = Color(1.0, 0.94, 0.83)   # тёплый солнечный свет (не белый «прожектор»)
 	sun.shadow_enabled = not _mobile   # на телефоне тени выключены (тяжело)
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS   # дешевле для большого леса
 	sun.directional_shadow_max_distance = 75.0   # тени только вблизи (туман скрывает дальние) → перф ок
@@ -448,11 +453,11 @@ func _build_environment() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 0.55
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_exposure = 1.05
+	env.tonemap_exposure = 0.92   # ниже — день не пересвечен
 	# лёгкий цветокор — чуть «киношнее»
 	env.adjustment_enabled = true
-	env.adjustment_brightness = 1.02
-	env.adjustment_contrast = 1.10
+	env.adjustment_brightness = 1.0
+	env.adjustment_contrast = 1.18   # больше контраста — не плоско
 	env.adjustment_saturation = 1.14
 	# мягкое свечение ярких/эмиссивных поверхностей (огонь/окна/луна/лампа)
 	env.glow_enabled = not _mobile   # glow выключен на телефоне (перф)
@@ -2577,9 +2582,9 @@ func _day_night() -> void:
 	var nf := clampf(smoothstep(0.48, 0.58, t) - smoothstep(0.92, 1.0, t), 0.0, 1.0)
 	sun.light_energy = lerpf(1.2, 0.08, nf)
 	sun.shadow_enabled = (not _mobile) and (nf < 0.5)   # на телефоне тени выкл; ночью солнце за горизонтом → тоже выкл
-	env.ambient_light_energy = lerpf(0.55, 0.12, nf)
+	env.ambient_light_energy = lerpf(0.40, 0.12, nf)   # день: ниже заливающий свет → объёмнее, не «прожектор»
 	env.background_energy_multiplier = lerpf(1.0, 0.22, nf)   # затемнить само небо ночью (BG_SKY не темнел → было светло)
-	env.fog_density = lerpf(0.020, 0.042, nf) + sin(clock * 0.15) * 0.0025   # гуще ночью + медленное «дыхание»
+	env.fog_density = lerpf(0.013, 0.042, nf) + sin(clock * 0.15) * 0.0025   # день: меньше белёсой дымки
 	env.fog_light_color = Color(0.70, 0.74, 0.74).lerp(Color(0.18, 0.21, 0.30), nf)   # глубже/холоднее/темнее ночью
 	if moon != null:                                   # прохладная лунная подсветка ночью
 		moon.visible = nf > 0.02
@@ -2703,11 +2708,32 @@ func _move_timokha(delta: float) -> void:
 	var hdir := Vector3.ZERO
 	if to.length() > 0.6:
 		hdir = to.normalized()
+	# обход застревания: если уперся между препятствиями — временно идём вбок, не теряя цель
+	if tk_detour_t > 0.0 and hdir.length() > 0.1:
+		tk_detour_t -= delta
+		hdir = (hdir * 0.35 + tk_detour * 0.9).normalized()
 	var vy := timokha.velocity.y - GRAVITY * delta
 	if timokha.is_on_floor() and vy < 0.0:
 		vy = -1.0
 	timokha.velocity = Vector3(hdir.x * spd, vy, hdir.z * spd)
 	timokha.move_and_slide()
+	# детект «застрял»: продвинулись сильно меньше ожидаемого, хотя бежали
+	if spd > 2.0 and hdir.length() > 0.1:
+		var moved := Vector2(timokha.global_position.x - tk_lastpos.x, timokha.global_position.z - tk_lastpos.z).length()
+		if moved < spd * delta * 0.4:
+			tk_stuck_t += delta
+		else:
+			tk_stuck_t = 0.0
+		if tk_stuck_t > 0.3 and tk_detour_t <= 0.0:
+			var perp := Vector3(-hdir.z, 0.0, hdir.x)   # вбок от направления на цель
+			if timokha.get_slide_collision_count() > 0 and perp.dot(timokha.get_wall_normal()) < 0.0:
+				perp = -perp   # в сторону от стены
+			tk_detour = perp.normalized()
+			tk_detour_t = 0.6
+			tk_stuck_t = 0.0
+	else:
+		tk_stuck_t = 0.0
+	tk_lastpos = timokha.global_position
 	if hdir.length() > 0.1:
 		timokha.look_at(timokha.global_position + hdir, Vector3.UP)
 	_animate_timokha(delta)
