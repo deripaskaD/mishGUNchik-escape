@@ -33,6 +33,7 @@ var sun: DirectionalLight3D
 var moon: DirectionalLight3D
 var env: Environment
 var rain: GPUParticles3D
+var fireflies: CPUParticles3D   # светлячки вокруг игрока ночью (атмосфера)
 var hud: Label
 var snd_rain: AudioStreamPlayer
 var snd_heart: AudioStreamPlayer
@@ -1578,6 +1579,38 @@ func _make_player() -> void:
 		lmat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		leaves.material_override = lmat
 		player.add_child(leaves)
+		# светлячки вокруг игрока — включаются ночью (см. _day_night)
+		fireflies = CPUParticles3D.new()
+		fireflies.position = Vector3(0, 1.0, 0)
+		fireflies.local_coords = false
+		fireflies.amount = 8 if _mobile else 24
+		fireflies.lifetime = 4.5
+		fireflies.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		fireflies.emission_box_extents = Vector3(10, 2.5, 10)
+		fireflies.gravity = Vector3.ZERO
+		fireflies.direction = Vector3(0, 1, 0)
+		fireflies.spread = 180.0
+		fireflies.initial_velocity_min = 0.15
+		fireflies.initial_velocity_max = 0.5
+		var fmesh := QuadMesh.new()
+		fmesh.size = Vector2(0.11, 0.11)
+		fireflies.mesh = fmesh
+		var fgrad := Gradient.new()
+		fgrad.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+		fgrad.colors = PackedColorArray([Color(0.85, 1.0, 0.45, 0.0), Color(0.85, 1.0, 0.45, 1.0), Color(0.85, 1.0, 0.45, 0.0)])
+		fireflies.color_ramp = fgrad
+		var fmat := StandardMaterial3D.new()
+		fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		fmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		fmat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		fmat.vertex_color_use_as_albedo = true
+		fmat.emission_enabled = true
+		fmat.emission = Color(0.75, 1.0, 0.4)
+		fmat.emission_energy_multiplier = 3.2
+		fireflies.material_override = fmat
+		fireflies.emitting = false
+		player.add_child(fireflies)
 
 func _small_sphere(pos: Vector3, r: float, col: Color) -> void:
 	var m := MeshInstance3D.new()
@@ -2638,6 +2671,10 @@ func _day_night() -> void:
 	if moon != null:                                   # прохладная лунная подсветка ночью
 		moon.visible = nf > 0.02
 		moon.light_energy = lerpf(0.0, 0.30, nf)
+	if fireflies != null:                              # светлячки только ночью
+		var fly := nf > 0.3
+		if fireflies.emitting != fly:
+			fireflies.emitting = fly
 	if tk_glow != null:                                # мягкая фронтальная подсветка ночью → видна текстура, без пересвета/bloom
 		tk_glow.light_energy = lerpf(0.0, 1.0, nf)
 	for tm in tk_mats:                                 # эмиссию почти убрать (она и давала «белый»)
