@@ -258,6 +258,8 @@ func _ready() -> void:
 	_autoplay = "--autoplay" in args
 	_touch_flag = "--touch" in args
 	_mobile = ("--mobile" in args) or OS.has_feature("web_android") or OS.has_feature("web_ios") or OS.has_feature("mobile")
+	if _mobile:
+		get_viewport().scaling_3d_scale = 0.7   # телефон: рендер 3D в 70% разрешения → крупный прирост FPS (ретина-экраны рендерят ×2-3)
 	_shothut = "--shothut" in args
 	_shotwin = "--shotwin" in args
 	if "--night" in args:
@@ -527,6 +529,7 @@ shader_type sky;
 
 uniform float nf : hint_range(0.0, 1.0) = 0.0;   // 0 = день, 1 = глубокая ночь
 uniform float tw : hint_range(0.0, 1.0) = 0.0;   // рассвет/закат (пик в момент смены)
+uniform float cloud_detail = 1.0;                // 1 = двухслойные облака; 0 (телефон) = один слой
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
@@ -581,11 +584,13 @@ void sky() {
 	if (dir.y > 0.0) {
 		vec2 proj = dir.xz / (dir.y + 0.16);
 
-		// ── облака (двухслойный FBM = пышные кучевые; объём через свет/тень) ──
+		// ── облака (FBM; на телефоне пропускаем второй слой — вдвое меньше per-pixel шума) ──
 		vec2 cuv = proj * 1.0 + vec2(TIME * 0.005, TIME * 0.0015);
 		float base = fbm(cuv * 1.2);
-		float detail = fbm(cuv * 3.1 + 5.0);
-		float dens = base * 0.72 + detail * 0.28;
+		float dens = base;
+		if (cloud_detail > 0.5) {
+			dens = base * 0.72 + fbm(cuv * 3.1 + 5.0) * 0.28;
+		}
 		c = smoothstep(0.42, 0.80, dens);                  // мягкие пышные комки
 		c *= smoothstep(0.0, 0.18, dir.y);                 // тают у горизонта
 		c *= (1.0 - nf);                                    // ночью безоблачно → чистые звёзды
@@ -649,6 +654,7 @@ func _build_environment() -> void:
 	sh.code = SKY_SHADER
 	sky_mat.shader = sh
 	sky_mat.set_shader_parameter("nf", 0.0)
+	sky_mat.set_shader_parameter("cloud_detail", 0.0 if _mobile else 1.0)   # телефон: облака в один слой (перф)
 	sky.sky_material = sky_mat
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -1570,7 +1576,7 @@ func _on_path(x: float, z: float) -> bool:
 func _build_forest() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260627
-	var n := 60 if _autoplay else (int(TREES / 3) if _mobile else TREES)   # на телефоне втрое меньше деревьев (перф)
+	var n := 60 if _autoplay else (int(TREES / 5) if _mobile else TREES)   # телефон: меньше деревьев (лаги у тестеров) — 480 вместо 800
 	var placed := 0
 	var attempts := 0
 	while placed < n and attempts < n * 4:
@@ -1602,7 +1608,7 @@ func _build_forest() -> void:
 		_tree(Vector3(x, 0, z), rng.randf_range(0.8, 1.5), rng.randf() < 0.35)
 	# плотная стена леса по периметру — визуальная граница, перекрывает обзор за край
 	if not _autoplay:
-		for i in (int(BORDER_TREES / 3) if _mobile else BORDER_TREES):
+		for i in (int(BORDER_TREES / 4) if _mobile else BORDER_TREES):
 			var bx := 0.0
 			var bz := 0.0
 			if rng.randf() < 0.5:
