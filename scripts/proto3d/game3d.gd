@@ -2630,7 +2630,7 @@ void fragment() {
 	snd_btn.pressed.connect(_toggle_mute)
 	pause_overlay.add_child(snd_btn)
 	journal_btn = Button.new()
-	journal_btn.text = "Дневник (0/%d)" % LORE.size()
+	journal_btn.text = "Дневник (%d/%d)" % [lore_found.size(), LORE.size()]   # учесть уже найденные (сейв)
 	journal_btn.size = Vector2(240, 56)
 	journal_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 76)
 	journal_btn.add_theme_font_size_override("font_size", 22)
@@ -3046,7 +3046,7 @@ func _process(delta: float) -> void:
 		_js_glimpse_t -= delta
 		if _js_glimpse_t <= 0.0:
 			_js_glimpse_t = randf_range(30.0, 60.0)
-			_jumpscare(0.32, 0.55, snd_dread)   # лёгкий мельк фигуры в темноте
+			_jumpscare(0.32, 0.55, null)   # лёгкий мельк фигуры (без звука — зацикленный дрон snd_dread не перезапускать!)
 	if danger_overlay != null:
 		var dval := 0.0
 		var vstr := 0.42   # базовый кинотон виньетки
