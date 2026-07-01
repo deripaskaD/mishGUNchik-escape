@@ -135,6 +135,7 @@ var done_t := 0.0
 var qbar_fill: ColorRect
 var qbar_label: Label
 var qbar_bg: ColorRect
+var quest_card: Panel   # фон-карточка цели (фокус внимания)
 var touch_root: Control   # контейнер тач-контролов (джойстик+кнопки) — прячем на финале
 var pause_btn: Button
 var catch_label: Label
@@ -411,9 +412,9 @@ func _ready() -> void:
 			player.global_position = _qshots[k]
 	if tutorial_label != null:
 		if show_touch:
-			tutorial_label.text = "Левый джойстик — идти · справа свайп — камера · БЕГ\nДелай дела ДНЁМ. НОЧЬЮ беги от Мишганчика!\nСобери всё и почини яхту, чтобы сбежать"
+			tutorial_label.text = "Джойстик — идти, свайп — камера, БЕГ\nДнём делай дела · ночью беги · почини яхту!"
 		else:
-			tutorial_label.text = "WASD — идти · Shift — бег · мышь — осмотр · Esc — пауза\nДелай дела ДНЁМ. НОЧЬЮ беги от Мишганчика!\nСобери всё и почини яхту, чтобы сбежать"
+			tutorial_label.text = "WASD — идти, мышь — камера, Shift — бег\nДнём делай дела · ночью беги · почини яхту!"
 	if pause_controls != null:
 		if show_touch:
 			pause_controls.text = "Управление: левый джойстик — идти · правая зона свайп — камера\nкнопки БЕГ / ПРЫЖОК · кнопка ❚❚ — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
@@ -2512,16 +2513,28 @@ void fragment() {
 	if ResourceLoader.exists("res://art/mishganchik.png"):
 		js_face.texture = load("res://art/mishganchik.png")
 	js_root.add_child(js_face)
-	# квест-зона: компас к цели + прогресс текущего дела (верх-центр, под счётчиком)
+	# квест-зона: карточка «ЦЕЛЬ» — единый фокус внимания (компас+дело), верх-центр
+	quest_card = Panel.new()
+	var qcs := StyleBoxFlat.new()
+	qcs.bg_color = Color(0.10, 0.12, 0.18, 0.72)
+	qcs.border_color = Color(1.0, 0.85, 0.4, 0.85)
+	qcs.set_border_width_all(2)
+	qcs.set_corner_radius_all(12)
+	quest_card.add_theme_stylebox_override("panel", qcs)
+	quest_card.size = Vector2(520, 52)
+	quest_card.position = Vector2(vp.x * 0.5 - 260, 56)
+	quest_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(quest_card)
 	quest_panel = Label.new()
 	quest_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	quest_panel.offset_top = 60
-	quest_panel.offset_bottom = 110
+	quest_panel.offset_top = 62
+	quest_panel.offset_bottom = 106
 	quest_panel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	quest_panel.add_theme_font_size_override("font_size", 18)
-	quest_panel.add_theme_color_override("font_color", Color(1.0, 0.92, 0.55))
+	quest_panel.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	quest_panel.add_theme_font_size_override("font_size", 19)
+	quest_panel.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
 	quest_panel.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	quest_panel.add_theme_constant_override("outline_size", 5)
+	quest_panel.add_theme_constant_override("outline_size", 4)
 	layer.add_child(quest_panel)
 	# подсказка-прогресс у прицела при подходе к квесту
 	quest_prompt = Label.new()
@@ -2551,8 +2564,8 @@ void fragment() {
 	# стартовая подсказка-туториал (первые ~9 с, текст ставится в _ready по show_touch)
 	tutorial_label = Label.new()
 	tutorial_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	tutorial_label.offset_top = vp.y * 0.16
-	tutorial_label.offset_bottom = vp.y * 0.16 + 96
+	tutorial_label.offset_top = vp.y * 0.60   # ниже центра — не перекрывает карточку цели вверху
+	tutorial_label.offset_bottom = vp.y * 0.60 + 80
 	tutorial_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	tutorial_label.add_theme_font_size_override("font_size", 20)
 	tutorial_label.add_theme_color_override("font_color", Color(1, 1, 1))
@@ -3643,7 +3656,7 @@ func _start_final_chase() -> void:
 
 func _hide_gameplay_hud() -> void:
 	# финальный экран (победа/проигрыш) — прячем игровой HUD/контролы, оставляя только итог
-	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, lives_label, crosshair, tutorial_label, done_label]:
+	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_card, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, lives_label, crosshair, tutorial_label, done_label]:
 		if n != null:
 			n.visible = false
 	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
@@ -3653,7 +3666,7 @@ func _hide_gameplay_hud() -> void:
 
 func _show_gameplay_hud() -> void:
 	# вернуть игровой HUD (после воскрешения)
-	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_panel, crosshair, lives_label]:
+	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_card, quest_panel, crosshair, lives_label]:
 		if n != null:
 			n.visible = true
 	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
