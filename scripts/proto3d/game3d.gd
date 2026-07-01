@@ -1345,7 +1345,7 @@ func _campfire(pos: Vector3) -> void:
 	# искры (поднимаются и гаснут)
 	var sparks := CPUParticles3D.new()
 	sparks.position = pos + Vector3(0, 0.55, 0)
-	sparks.amount = 22
+	sparks.amount = 10 if _mobile else 22
 	sparks.lifetime = 1.5
 	sparks.direction = Vector3(0, 1, 0)
 	sparks.spread = 22.0
@@ -1885,7 +1885,7 @@ func _make_player() -> void:
 		var leaves := CPUParticles3D.new()
 		leaves.position = Vector3(0, 4, 0)
 		leaves.local_coords = false   # листья живут в мире (не «качаются» при повороте камеры)
-		leaves.amount = 30
+		leaves.amount = 12 if _mobile else 30   # меньше листьев на телефоне (перф)
 		leaves.lifetime = 7.0
 		leaves.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 		leaves.emission_box_extents = Vector3(8, 4, 8)   # объём по высоте → листья на всех уровнях
