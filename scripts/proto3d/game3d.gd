@@ -657,7 +657,7 @@ func _build_environment() -> void:
 	env.adjustment_enabled = true
 	env.adjustment_brightness = 1.0
 	env.adjustment_contrast = 1.18   # больше контраста — не плоско
-	env.adjustment_saturation = 1.22   # сочнее цвета (детям ярко)
+	env.adjustment_saturation = 1.12   # сочно, но не кислотно (было 1.22)
 	# мягкое свечение ярких/эмиссивных поверхностей (огонь/окна/луна/лампа)
 	env.glow_enabled = not _mobile   # glow выключен на телефоне (перф)
 	env.glow_intensity = 0.45
@@ -3186,13 +3186,13 @@ func _day_night() -> void:
 		var dusk := 1.0 - clampf(absf(t - 0.53) / 0.07, 0.0, 1.0)   # закат
 		var dawn := 1.0 - clampf(absf(t - 0.96) / 0.06, 0.0, 1.0)   # рассвет
 		sky_mat.set_shader_parameter("tw", maxf(dusk, dawn))
-	sun.light_energy = lerpf(1.2, 0.08, nf)
+	sun.light_energy = lerpf(0.85, 0.08, nf)   # было 1.2 — пересвет (белые деревья); мягче
 	sun.shadow_enabled = (not _mobile) and (nf < 0.5)   # на телефоне тени выкл; ночью солнце за горизонтом → тоже выкл
-	env.ambient_light_energy = lerpf(0.40, 0.12, nf)   # день: ниже заливающий свет → объёмнее, не «прожектор»
+	env.ambient_light_energy = lerpf(0.28, 0.10, nf)   # ниже заливающий свет → объём, не «прожектор»
 	env.fog_density = lerpf(0.011, 0.042, nf) + sin(clock * 0.15) * 0.0025   # день: меньше белёсой дымки
 	env.fog_height_density = lerpf(0.0, 0.07, nf)   # ночью — стелющийся туман у земли (хоррор)
 	env.fog_light_color = Color(0.60, 0.80, 1.0).lerp(Color(0.18, 0.21, 0.30), nf)   # день: голубоватая дымка (не серая); ночь: тёмно-синяя
-	env.tonemap_exposure = lerpf(1.06, 0.85, nf)   # день ярче (детям сочно), ночь темнее (хоррор)
+	env.tonemap_exposure = lerpf(0.85, 0.78, nf)   # было 1.06 — выжигало в белое; теперь не пересвечено
 	if moon != null:                                   # прохладная лунная подсветка ночью
 		moon.visible = nf > 0.02
 		moon.light_energy = lerpf(0.0, 0.30, nf)
