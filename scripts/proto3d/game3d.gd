@@ -522,7 +522,6 @@ void fragment() {
 
 const SKY_SHADER := "
 shader_type sky;
-render_mode use_quarter_res_pass;
 
 uniform float nf : hint_range(0.0, 1.0) = 0.0;   // 0 = день, 1 = глубокая ночь
 uniform float tw : hint_range(0.0, 1.0) = 0.0;   // рассвет/закат (пик в момент смены)
