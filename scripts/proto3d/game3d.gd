@@ -183,6 +183,7 @@ var win_quit_btn: Button
 const MAX_LIVES := 3
 var lives := MAX_LIVES
 var lives_label: Label
+var life_pips: Array = []   # сердечки-жизни (визуально, вместо текста «Жизни: N»)
 var revive_btn: Button
 var _revived := false   # воскрешение «за рекламу» доступно один раз за забег (заглушка)
 # ── джампскейры: резкое появление Мишганчика крупным планом + звук ──
@@ -2453,14 +2454,31 @@ void fragment() {
 	catch_label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	catch_label.add_theme_constant_override("outline_size", 4)
 	layer.add_child(catch_label)
-	lives_label = Label.new()
-	lives_label.position = Vector2(16, 64)
-	lives_label.add_theme_font_size_override("font_size", 20)
-	lives_label.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45))
-	lives_label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	lives_label.add_theme_constant_override("outline_size", 5)
-	lives_label.text = "Жизни: %d" % lives
+	lives_label = Label.new()   # оставлен скрытым (совместимость ссылок); жизни теперь сердечками
+	lives_label.visible = false
 	layer.add_child(lives_label)
+	# жизни — сердечки-пипсы (понятно детям, без текста)
+	var heart := PackedVector2Array([
+		Vector2(0, 0.40), Vector2(0.40, 0.0), Vector2(0.5, -0.24), Vector2(0.36, -0.46),
+		Vector2(0.17, -0.42), Vector2(0, -0.22), Vector2(-0.17, -0.42), Vector2(-0.36, -0.46),
+		Vector2(-0.5, -0.24), Vector2(-0.40, 0.0)])
+	for i in (MAX_LIVES + 3):
+		var holder := Node2D.new()
+		holder.position = Vector2(34 + i * 34, 84)
+		var shadow := Polygon2D.new()
+		var sp := PackedVector2Array()
+		for p in heart: sp.append(p * 25.0 + Vector2(1.5, 1.5))
+		shadow.polygon = sp
+		shadow.color = Color(0, 0, 0, 0.55)
+		holder.add_child(shadow)
+		var hrt := Polygon2D.new()
+		var pp := PackedVector2Array()
+		for p in heart: pp.append(p * 23.0)
+		hrt.polygon = pp
+		hrt.color = Color(1.0, 0.26, 0.3)
+		holder.add_child(hrt)
+		layer.add_child(holder)
+		life_pips.append(holder)
 	# ── баннер финальной погони ──
 	chase_banner = Label.new()
 	chase_banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -3568,9 +3586,7 @@ func _soft_respawn() -> void:
 	# в финальной погоне игрок остаётся на месте (не терять ~200м пути к яхте) — только отброс охотника
 	var ang := randf() * TAU
 	timokha.global_position = player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 60.0
-	wake = 3.5            # передышка: охота не ловит, пока отрываешься
-	if lives_label != null:
-		lives_label.text = "Жизни: %d" % lives
+	wake = 3.5            # передышка: охота не ловит, пока отрываешься (сердечки обновятся в _refresh_hud)
 
 func _revive() -> void:
 	# «воскрешение за рекламу» — ЗАГЛУШКА: реальный рекламный SDK подключает пользователь.
@@ -3658,8 +3674,8 @@ func _refresh_hud() -> void:
 	if catch_label != null:
 		catch_label.text = "Поймали: %d" % caught
 		catch_label.visible = caught > 0
-	if lives_label != null:
-		lives_label.text = "Жизни: %d" % lives
+	for i in life_pips.size():
+		life_pips[i].visible = (i < lives) and not won and not lost   # сердечки по числу жизней
 	_update_quest_prompt()
 	if lost:
 		hud.text = ""
@@ -3691,14 +3707,19 @@ func _refresh_hud() -> void:
 		return
 	var t := fmod(clock, DAY_LEN) / DAY_LEN
 	var phase := ""
-	if t <= 0.52:
-		phase = "ДЕНЬ — делай дела (до ночи %0.0f с)" % ((0.52 - t) * DAY_LEN)
-	else:
-		phase = "НОЧЬ — Мишганчик охотится, беги! (до утра %0.0f с)" % ((1.0 - t) * DAY_LEN)
+	var pcol := Color(0.72, 1.0, 0.75)
 	if wake > 0.0:
-		phase = "Мишганчик ещё спит (%0.0f с) — успей сделать дела" % wake
-	# верх-лево: только статус (фаза + ресурсы). Управление — в меню паузы.
-	hud.text = "Ночь %d · %s\nДрова: %d    Травы: %d" % [nights, phase, wood, herbs]
+		phase = "Мишганчик спит: %0.0f" % wake
+		pcol = Color(1.0, 0.9, 0.5)
+	elif t <= 0.52:
+		phase = "ДЕНЬ · до ночи %0.0f" % ((0.52 - t) * DAY_LEN)
+		pcol = Color(0.72, 1.0, 0.75)   # зелёный = безопасно
+	else:
+		phase = "НОЧЬ · БЕГИ! · %0.0f" % ((1.0 - t) * DAY_LEN)
+		pcol = Color(1.0, 0.5, 0.45)     # красный = опасно
+	# верх-лево: только компактный цветной статус (ресурсы — в хотбаре снизу, не дублируем)
+	hud.text = phase
+	hud.add_theme_color_override("font_color", pcol)
 	# верх-центр: квест-зона (компас к цели + текущее дело), под прогресс-баром
 	var qp := ""
 	var tq := _nearest_target()
