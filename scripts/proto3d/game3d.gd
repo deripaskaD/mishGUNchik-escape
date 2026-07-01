@@ -3562,12 +3562,14 @@ func _check_catch() -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 func _soft_respawn() -> void:
-	# вернуть игрока к избе, Мишганчика отбросить, дать короткую неуязвимость
-	player.global_position = Vector3(0, 1.0, 16)
+	# Мишганчика отбросить, дать короткую неуязвимость.
 	player.velocity = Vector3.ZERO
+	if not final_chase:
+		player.global_position = Vector3(0, 1.0, 16)   # обычная ночь — назад к избе (укрытие)
+	# в финальной погоне игрок остаётся на месте (не терять ~200м пути к яхте) — только отброс охотника
 	var ang := randf() * TAU
 	timokha.global_position = player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 60.0
-	wake = 3.5            # передышка: ночная охота не ловит, пока добегаешь до укрытия
+	wake = 3.5            # передышка: охота не ловит, пока отрываешься
 	if lives_label != null:
 		lives_label.text = "Жизни: %d" % lives
 
