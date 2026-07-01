@@ -2607,7 +2607,7 @@ void fragment() {
 	restart_btn.text = "Играть снова"
 	restart_btn.size = Vector2(250, 60)
 	restart_btn.position = Vector2(vp.x * 0.5 - 260, vp.y - 150)
-	restart_btn.add_theme_font_size_override("font_size", 24)
+	_style_button(restart_btn, Color(0.24, 0.6, 0.34))
 	restart_btn.visible = false
 	restart_btn.pressed.connect(_restart_game)
 	layer.add_child(restart_btn)
@@ -2615,8 +2615,7 @@ void fragment() {
 	revive_btn.text = "Воскреснуть (реклама)"
 	revive_btn.size = Vector2(300, 60)
 	revive_btn.position = Vector2(vp.x * 0.5 - 150, vp.y - 230)
-	revive_btn.add_theme_font_size_override("font_size", 22)
-	revive_btn.add_theme_color_override("font_color", Color(1.0, 0.92, 0.5))
+	_style_button(revive_btn, Color(0.82, 0.6, 0.16))   # золотой — выделяется
 	revive_btn.visible = false
 	revive_btn.pressed.connect(_revive)
 	layer.add_child(revive_btn)
@@ -2624,7 +2623,7 @@ void fragment() {
 	win_quit_btn.text = "Выход"
 	win_quit_btn.size = Vector2(250, 60)
 	win_quit_btn.position = Vector2(vp.x * 0.5 + 10, vp.y - 150)
-	win_quit_btn.add_theme_font_size_override("font_size", 24)
+	_style_button(win_quit_btn, Color(0.42, 0.32, 0.38))
 	win_quit_btn.visible = false
 	win_quit_btn.pressed.connect(_quit_game)
 	layer.add_child(win_quit_btn)
@@ -2649,28 +2648,28 @@ void fragment() {
 	btn_resume.text = "Продолжить"
 	btn_resume.size = Vector2(240, 56)
 	btn_resume.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 - 60)
-	btn_resume.add_theme_font_size_override("font_size", 22)
+	_style_button(btn_resume, Color(0.24, 0.6, 0.34))
 	btn_resume.pressed.connect(_resume_game)
 	pause_overlay.add_child(btn_resume)
 	snd_btn = Button.new()
 	snd_btn.text = "Звук: вкл"
 	snd_btn.size = Vector2(240, 56)
 	snd_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 8)
-	snd_btn.add_theme_font_size_override("font_size", 22)
+	_style_button(snd_btn, Color(0.26, 0.5, 0.8))
 	snd_btn.pressed.connect(_toggle_mute)
 	pause_overlay.add_child(snd_btn)
 	journal_btn = Button.new()
 	journal_btn.text = "Дневник (%d/%d)" % [lore_found.size(), LORE.size()]   # учесть уже найденные (сейв)
 	journal_btn.size = Vector2(240, 56)
 	journal_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 76)
-	journal_btn.add_theme_font_size_override("font_size", 22)
+	_style_button(journal_btn, Color(0.45, 0.36, 0.62))
 	journal_btn.pressed.connect(_toggle_journal)
 	pause_overlay.add_child(journal_btn)
 	var btn_quit := Button.new()
 	btn_quit.text = "Выход"
 	btn_quit.size = Vector2(240, 56)
 	btn_quit.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 144)
-	btn_quit.add_theme_font_size_override("font_size", 22)
+	_style_button(btn_quit, Color(0.6, 0.28, 0.28))
 	btn_quit.pressed.connect(_quit_game)
 	pause_overlay.add_child(btn_quit)
 	# подсказка управления — только здесь, в паузе (не засоряет игровой HUD); текст ставится в _ready по show_touch
@@ -2714,7 +2713,7 @@ void fragment() {
 	jclose.text = "Закрыть"
 	jclose.size = Vector2(200, 52)
 	jclose.position = Vector2(vp.x * 0.5 - 100, vp.y - 78)
-	jclose.add_theme_font_size_override("font_size", 22)
+	_style_button(jclose, Color(0.42, 0.32, 0.38))
 	jclose.pressed.connect(_toggle_journal)
 	journal_panel.add_child(jclose)
 
@@ -2864,13 +2863,37 @@ func _touch_button(root: Control, text: String, pos: Vector2, size: Vector2, is_
 	b.position = pos
 	b.custom_minimum_size = size
 	b.size = size
-	b.add_theme_font_size_override("font_size", 28)
+	_style_button(b, Color(0.24, 0.62, 0.35) if is_sprint else Color(0.26, 0.5, 0.8), 30)
 	if is_sprint:
 		b.button_down.connect(func(): touch_sprint = true)
 		b.button_up.connect(func(): touch_sprint = false)
 	else:
 		b.button_down.connect(func(): touch_jump = true)
 	root.add_child(b)
+
+func _style_button(b: Button, base: Color, fsize: int = 24) -> void:
+	# единый детский стиль кнопок: скруглённые, цветные, с обводкой
+	b.add_theme_font_size_override("font_size", fsize)
+	b.add_theme_color_override("font_color", Color(1, 1, 1))
+	b.add_theme_color_override("font_hover_color", Color(1, 1, 1))
+	b.add_theme_color_override("font_pressed_color", Color(1, 1, 1))
+	b.add_theme_color_override("font_focus_color", Color(1, 1, 1))
+	for st in ["normal", "hover", "pressed", "focus"]:
+		var sb := StyleBoxFlat.new()
+		var c := base
+		if st == "hover":
+			c = base.lightened(0.14)
+		elif st == "pressed":
+			c = base.darkened(0.18)
+		sb.bg_color = c
+		sb.set_corner_radius_all(18)
+		sb.border_color = Color(1, 1, 1, 0.55)
+		sb.set_border_width_all(2)
+		sb.content_margin_left = 12
+		sb.content_margin_right = 12
+		sb.content_margin_top = 8
+		sb.content_margin_bottom = 8
+		b.add_theme_stylebox_override(st, sb)
 
 func _round_panel(diam: float, color: Color) -> Panel:
 	var p := Panel.new()
