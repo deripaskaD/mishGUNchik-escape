@@ -175,8 +175,10 @@ var streak := 0
 var daily_bonus := 0
 var _save_day := 0
 var _new_daily := false
+var lowgfx := false   # ручной режим «Графика: Низ» (сохраняется) — форсит мобильные оптимизации
 var window_mats: Array = []
 var snd_btn: Button
+var gfx_btn: Button
 var _muted := false
 var _yacht_announced := false
 var restart_btn: Button
@@ -258,8 +260,6 @@ func _ready() -> void:
 	_autoplay = "--autoplay" in args
 	_touch_flag = "--touch" in args
 	_mobile = ("--mobile" in args) or OS.has_feature("web_android") or OS.has_feature("web_ios") or OS.has_feature("mobile")
-	if _mobile:
-		get_viewport().scaling_3d_scale = 0.7   # телефон: рендер 3D в 70% разрешения → крупный прирост FPS (ретина-экраны рендерят ×2-3)
 	_shothut = "--shothut" in args
 	_shotwin = "--shotwin" in args
 	if "--night" in args:
@@ -268,7 +268,11 @@ func _ready() -> void:
 	if _autoplay:
 		print("[autoplay] start")
 	if not _autoplay:
-		_load_save()   # стрик/бонус-жизни/дневник до постройки HUD
+		_load_save()   # стрик/бонус-жизни/дневник/lowgfx до постройки HUD
+	if lowgfx:
+		_mobile = true   # ручной режим «Графика: Низ» форсит все мобильные оптимизации на любом устройстве
+	if _mobile:
+		get_viewport().scaling_3d_scale = 0.7   # рендер 3D в 70% → крупный прирост FPS (ретина рендерит ×2-3)
 	_build_materials()
 	_build_environment()
 	_build_ground()
@@ -2641,8 +2645,8 @@ void fragment() {
 	layer.add_child(pause_overlay)
 	var ptitle := Label.new()
 	ptitle.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	ptitle.offset_top = vp.y * 0.5 - 120
-	ptitle.offset_bottom = vp.y * 0.5 - 70
+	ptitle.offset_top = vp.y * 0.5 - 158
+	ptitle.offset_bottom = vp.y * 0.5 - 108
 	ptitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ptitle.add_theme_font_size_override("font_size", 42)
 	ptitle.add_theme_color_override("font_color", Color(0.9, 0.92, 1.0))
@@ -2653,36 +2657,43 @@ void fragment() {
 	var btn_resume := Button.new()
 	btn_resume.text = "Продолжить"
 	btn_resume.size = Vector2(240, 56)
-	btn_resume.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 - 60)
+	btn_resume.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 - 98)
 	_style_button(btn_resume, Color(0.24, 0.6, 0.34))
 	btn_resume.pressed.connect(_resume_game)
 	pause_overlay.add_child(btn_resume)
 	snd_btn = Button.new()
 	snd_btn.text = "Звук: вкл"
-	snd_btn.size = Vector2(240, 56)
-	snd_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 8)
+	snd_btn.size = Vector2(240, 54)
+	snd_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 - 36)
 	_style_button(snd_btn, Color(0.26, 0.5, 0.8))
 	snd_btn.pressed.connect(_toggle_mute)
 	pause_overlay.add_child(snd_btn)
+	gfx_btn = Button.new()
+	gfx_btn.text = "Графика: Низ" if lowgfx else "Графика: Выс"
+	gfx_btn.size = Vector2(240, 54)
+	gfx_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 26)
+	_style_button(gfx_btn, Color(0.3, 0.5, 0.5))
+	gfx_btn.pressed.connect(_toggle_gfx)
+	pause_overlay.add_child(gfx_btn)
 	journal_btn = Button.new()
 	journal_btn.text = "Дневник (%d/%d)" % [lore_found.size(), LORE.size()]   # учесть уже найденные (сейв)
-	journal_btn.size = Vector2(240, 56)
-	journal_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 76)
+	journal_btn.size = Vector2(240, 54)
+	journal_btn.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 88)
 	_style_button(journal_btn, Color(0.45, 0.36, 0.62))
 	journal_btn.pressed.connect(_toggle_journal)
 	pause_overlay.add_child(journal_btn)
 	var btn_quit := Button.new()
 	btn_quit.text = "Выход"
-	btn_quit.size = Vector2(240, 56)
-	btn_quit.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 144)
+	btn_quit.size = Vector2(240, 54)
+	btn_quit.position = Vector2(vp.x * 0.5 - 120, vp.y * 0.5 + 150)
 	_style_button(btn_quit, Color(0.6, 0.28, 0.28))
 	btn_quit.pressed.connect(_quit_game)
 	pause_overlay.add_child(btn_quit)
 	# подсказка управления — только здесь, в паузе (не засоряет игровой HUD); текст ставится в _ready по show_touch
 	pause_controls = Label.new()
 	pause_controls.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	pause_controls.offset_top = vp.y * 0.5 + 214
-	pause_controls.offset_bottom = vp.y * 0.5 + 298
+	pause_controls.offset_top = vp.y * 0.5 + 220
+	pause_controls.offset_bottom = vp.y * 0.5 + 304
 	pause_controls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pause_controls.add_theme_font_size_override("font_size", 17)
 	pause_controls.add_theme_color_override("font_color", Color(0.8, 0.85, 0.95))
@@ -2766,6 +2777,7 @@ func _load_save() -> void:
 	streak = int(data.get("streak", 0))
 	daily_bonus = int(data.get("bonus", 0))
 	_save_day = int(data.get("day", 0))
+	lowgfx = bool(data.get("lowgfx", false))
 	lore_idx = clampi(int(data.get("lore", 0)), 0, LORE.size())
 	lore_found.clear()
 	for i in lore_idx:
@@ -2784,7 +2796,7 @@ func _save_game() -> void:
 		return   # тест/скриншот-режимы не пишут сейв
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f != null:
-		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx}))
+		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx}))
 		f.close()
 
 func _toggle_pause() -> void:
@@ -2805,6 +2817,17 @@ func _toggle_mute() -> void:
 	AudioServer.set_bus_mute(0, _muted)   # 0 — мастер-шина
 	if snd_btn != null:
 		snd_btn.text = "Звук: выкл" if _muted else "Звук: вкл"
+
+func _toggle_gfx() -> void:
+	# переключить и сохранить режим графики; применяется после перезапуска (мир строится на старте)
+	lowgfx = not lowgfx
+	_save_game()
+	if gfx_btn != null:
+		gfx_btn.text = "Графика: Низ" if lowgfx else "Графика: Выс"
+	if done_label != null:
+		done_label.add_theme_color_override("font_color", Color(0.7, 0.9, 1.0))
+		done_label.text = "Графика: %s — перезапусти игру для применения" % ("НИЗ" if lowgfx else "ВЫС")
+		done_t = 3.5
 
 func _quit_game() -> void:
 	get_tree().quit()
