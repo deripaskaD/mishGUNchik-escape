@@ -2807,26 +2807,64 @@ func _restart_game() -> void:
 	get_tree().reload_current_scene()
 
 func _hotbar_slot(layer: CanvasLayer, pos: Vector2, col: Color, name: String) -> Label:
-	var box := ColorRect.new()
-	box.color = Color(col.r, col.g, col.b, 0.8)
+	# слот-карточка: скруглённая плашка + нарисованная иконка (бревно/лист) + крупный счётчик, без текста-подписи
+	var box := Panel.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.12, 0.13, 0.17, 0.80)
+	sb.set_corner_radius_all(14)
+	sb.border_color = Color(col.r, col.g, col.b, 0.95)
+	sb.set_border_width_all(3)
+	box.add_theme_stylebox_override("panel", sb)
 	box.position = pos
-	box.size = Vector2(88, 70)
+	box.size = Vector2(96, 66)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(box)
-	var nm := Label.new()
-	nm.text = name
-	nm.position = Vector2(6, 2)   # относительно box → прячется вместе со слотом
-	nm.add_theme_font_size_override("font_size", 16)
-	nm.add_theme_color_override("font_color", Color(1, 1, 1))
-	box.add_child(nm)
+	_hotbar_icon(box, name)   # иконка слева
 	var cnt := Label.new()
-	cnt.position = Vector2(34, 24)   # относительно box
-	cnt.add_theme_font_size_override("font_size", 34)
+	cnt.position = Vector2(50, 8)
+	cnt.size = Vector2(40, 50)
+	cnt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cnt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cnt.add_theme_font_size_override("font_size", 36)
 	cnt.add_theme_color_override("font_color", Color(1, 1, 1))
 	cnt.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	cnt.add_theme_constant_override("outline_size", 5)
 	cnt.text = "0"
 	box.add_child(cnt)
 	return cnt
+
+func _hotbar_icon(box: Panel, name: String) -> void:
+	if name == "Дрова":
+		# бревно: коричневый брусок + тёмные торцы-кольца
+		var log := Panel.new()
+		var ls := StyleBoxFlat.new()
+		ls.bg_color = Color(0.52, 0.34, 0.18)
+		ls.set_corner_radius_all(7)
+		ls.border_color = Color(0.34, 0.21, 0.10)
+		ls.set_border_width_all(2)
+		log.add_theme_stylebox_override("panel", ls)
+		log.position = Vector2(9, 20)
+		log.size = Vector2(34, 26)
+		log.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(log)
+		var ring := ColorRect.new()
+		ring.color = Color(0.40, 0.26, 0.13)
+		ring.position = Vector2(24, 22)
+		ring.size = Vector2(3, 22)
+		ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		log.add_child(ring)
+	else:
+		# лист: зелёный полигон + прожилка
+		var leaf := Polygon2D.new()
+		leaf.polygon = PackedVector2Array([
+			Vector2(26, 16), Vector2(38, 26), Vector2(30, 42), Vector2(14, 40), Vector2(12, 26)])
+		leaf.color = Color(0.30, 0.62, 0.24)
+		box.add_child(leaf)
+		var vein := Polygon2D.new()
+		vein.polygon = PackedVector2Array([
+			Vector2(25, 18), Vector2(27, 18), Vector2(21, 40), Vector2(19, 40)])
+		vein.color = Color(0.18, 0.42, 0.15)
+		box.add_child(vein)
 
 func _build_touch() -> void:
 	# На web is_touchscreen_available() часто врёт (true на десктопе) → показывал тач-джойстик вместо WASD/мыши.
