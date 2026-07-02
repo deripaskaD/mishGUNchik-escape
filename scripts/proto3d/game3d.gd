@@ -79,6 +79,9 @@ var tk_arms: Array = []
 var tk_walk := 0.0
 var _tree_pine: Array = []
 var _tree_leafy: Array = []
+# ── MultiMesh-батчинг растительности: тысячи деревьев/декора → десяток draw-объектов (перф) ──
+var _mm_templates := {}   # PackedScene → [{mesh, local, override}] (разобранный шаблон)
+var _mm_batches := {}     # Mesh → {"xforms": Array[Transform3D], "override": Material}
 var _rock_scenes: Array = []
 var _bush_scenes: Array = []
 var _log_scenes: Array = []
@@ -287,6 +290,7 @@ func _ready() -> void:
 	_make_player()
 	_make_timokha()
 	_build_quests()
+	_flush_batches()   # весь накопленный лес/декор → MultiMesh (после ВСЕХ строителей)
 	if not _autoplay:
 		_build_rain()
 	_build_hud()
@@ -960,14 +964,9 @@ func _scatter_models(names: Array, pos: Vector3, count: int, rmin: float, rmax: 
 	if scenes.is_empty():
 		return
 	for i in count:
-		var m: Node3D = scenes[rng.randi() % scenes.size()].instantiate()
-		var s := scl * rng.randf_range(0.8, 1.3)
-		m.scale = Vector3(s, s, s)
 		var a := rng.randf() * TAU
 		var r := rng.randf_range(rmin, rmax)
-		m.position = pos + Vector3(cos(a) * r, 0, sin(a) * r)
-		m.rotation.y = rng.randf() * TAU
-		add_child(m)
+		_batch_scene(scenes[rng.randi() % scenes.size()], _yrot_scale(pos + Vector3(cos(a) * r, 0, sin(a) * r), rng.randf() * TAU, scl * rng.randf_range(0.8, 1.3)))
 
 func _scatter_global(names: Array, count: int, scl: float) -> void:
 	# мелкая флора по ВСЕЙ карте (жизнь): обходит поляну/тропы/хижины/озеро/ориентиры
@@ -1000,12 +999,7 @@ func _scatter_global(names: Array, count: int, scl: float) -> void:
 		if skip:
 			continue
 		placed += 1
-		var m: Node3D = scenes[rng.randi() % scenes.size()].instantiate()
-		var s := scl * rng.randf_range(0.7, 1.4)
-		m.scale = Vector3(s, s, s)
-		m.position = Vector3(x, 0, z)
-		m.rotation.y = rng.randf() * TAU
-		add_child(m)
+		_batch_scene(scenes[rng.randi() % scenes.size()], _yrot_scale(Vector3(x, 0, z), rng.randf() * TAU, scl * rng.randf_range(0.7, 1.4)))
 
 func _scatter_clumps(names: Array, clumps: int, per_clump: int, radius: float, scl: float) -> void:
 	# кучки подлеска (трава/мелкие кусты) — естественные пятна, а не одиночки
@@ -1039,14 +1033,9 @@ func _scatter_clumps(names: Array, clumps: int, per_clump: int, radius: float, s
 			continue
 		placed += 1
 		for j in per_clump:
-			var m: Node3D = scenes[rng.randi() % scenes.size()].instantiate()
-			var s := scl * rng.randf_range(0.7, 1.3)
-			m.scale = Vector3(s, s, s)
 			var a := rng.randf() * TAU
 			var r := rng.randf_range(0.0, radius)
-			m.position = Vector3(cx + cos(a) * r, 0, cz + sin(a) * r)
-			m.rotation.y = rng.randf() * TAU
-			add_child(m)
+			_batch_scene(scenes[rng.randi() % scenes.size()], _yrot_scale(Vector3(cx + cos(a) * r, 0, cz + sin(a) * r), rng.randf() * TAU, scl * rng.randf_range(0.7, 1.3)))
 
 func _log_clusters(count: int) -> void:
 	# «лёжки» — упавшее бревно с грибами/травой вокруг (естественный валежник)
@@ -1082,32 +1071,17 @@ func _log_clusters(count: int) -> void:
 		placed += 1
 		var axis := rng.randf() * TAU   # ось лежащего бревна
 		# основное бревно
-		var lm: Node3D = logs[rng.randi() % logs.size()].instantiate()
-		var lsc := rng.randf_range(1.8, 2.6)
-		lm.scale = Vector3(lsc, lsc, lsc)
-		lm.position = Vector3(cx, 0, cz)
-		lm.rotation.y = axis
-		add_child(lm)
+		_batch_scene(logs[rng.randi() % logs.size()], _yrot_scale(Vector3(cx, 0, cz), axis, rng.randf_range(1.8, 2.6)))
 		# иногда — обломок поменьше рядом, вдоль той же оси
 		if rng.randf() < 0.6:
-			var lm2: Node3D = logs[rng.randi() % logs.size()].instantiate()
-			var lsc2 := rng.randf_range(1.0, 1.6)
-			lm2.scale = Vector3(lsc2, lsc2, lsc2)
 			var off := rng.randf_range(1.6, 2.8)
-			lm2.position = Vector3(cx + cos(axis) * off, 0, cz + sin(axis) * off)
-			lm2.rotation.y = axis + rng.randf_range(-0.4, 0.4)
-			add_child(lm2)
+			_batch_scene(logs[rng.randi() % logs.size()], _yrot_scale(Vector3(cx + cos(axis) * off, 0, cz + sin(axis) * off), axis + rng.randf_range(-0.4, 0.4), rng.randf_range(1.0, 1.6)))
 		# грибы/трава, проросшие у гнилого бревна
 		if not deco.is_empty():
 			for j in rng.randi_range(2, 4):
-				var dm: Node3D = deco[rng.randi() % deco.size()].instantiate()
-				var ds := rng.randf_range(1.4, 2.2)
-				dm.scale = Vector3(ds, ds, ds)
 				var da := rng.randf() * TAU
 				var dr := rng.randf_range(0.4, 1.6)
-				dm.position = Vector3(cx + cos(da) * dr, 0, cz + sin(da) * dr)
-				dm.rotation.y = rng.randf() * TAU
-				add_child(dm)
+				_batch_scene(deco[rng.randi() % deco.size()], _yrot_scale(Vector3(cx + cos(da) * dr, 0, cz + sin(da) * dr), rng.randf() * TAU, rng.randf_range(1.4, 2.2)))
 
 func _ground_detail() -> void:
 	var rng := RandomNumberGenerator.new()
@@ -1660,12 +1634,7 @@ func _build_forest() -> void:
 				if ResourceLoader.exists(bp):
 					_bush_scenes.append(load(bp))
 		if not _bush_scenes.is_empty():
-			var bm: Node3D = _bush_scenes[randi() % _bush_scenes.size()].instantiate()
-			var bsc := rng.randf_range(1.3, 2.2)
-			bm.scale = Vector3(bsc, bsc, bsc)
-			bm.position = Vector3(bx, 0, bz)
-			bm.rotation.y = rng.randf_range(0.0, TAU)
-			add_child(bm)
+			_batch_scene(_bush_scenes[randi() % _bush_scenes.size()], _yrot_scale(Vector3(bx, 0, bz), rng.randf_range(0.0, TAU), rng.randf_range(1.3, 2.2)))
 		else:
 			var bush := MeshInstance3D.new()
 			var bsm := SphereMesh.new()
@@ -1694,12 +1663,7 @@ func _build_forest() -> void:
 				if ResourceLoader.exists(lp):
 					_log_scenes.append(load(lp))
 		if not _log_scenes.is_empty():
-			var lm: Node3D = _log_scenes[rng.randi() % _log_scenes.size()].instantiate()
-			var lsc := rng.randf_range(1.6, 2.4)
-			lm.scale = Vector3(lsc, lsc, lsc)
-			lm.position = Vector3(lx, 0, lz)
-			lm.rotation.y = rng.randf() * TAU
-			add_child(lm)
+			_batch_scene(_log_scenes[rng.randi() % _log_scenes.size()], _yrot_scale(Vector3(lx, 0, lz), rng.randf() * TAU, rng.randf_range(1.6, 2.4)))
 		else:
 			var lg := MeshInstance3D.new()
 			var lc := CylinderMesh.new()
@@ -1711,6 +1675,66 @@ func _build_forest() -> void:
 			lg.rotation = Vector3(0, rng.randf_range(0.0, PI), PI * 0.5)
 			lg.material_override = m_trunk
 			add_child(lg)
+
+func _mm_collect(n: Node, xf: Transform3D, acc: Array) -> void:
+	# разобрать шаблон GLB: все MeshInstance3D с накопленным локальным трансформом
+	if n is Node3D:
+		xf = xf * (n as Node3D).transform
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh != null:
+		var mi := n as MeshInstance3D
+		var mesh: Mesh = mi.mesh
+		# у части GLB материалы лежат surface-override'ами на ноде (не в меше) — MultiMesh их теряет.
+		# Вшиваем override'ы в копию меша (один раз на шаблон), иначе объекты белеют.
+		for i in mesh.get_surface_count():
+			if mi.get_surface_override_material(i) != null:
+				mesh = mesh.duplicate()
+				for j in mesh.get_surface_count():
+					var om := mi.get_surface_override_material(j)
+					if om != null:
+						mesh.surface_set_material(j, om)
+				break
+		acc.append({"mesh": mesh, "local": xf, "override": mi.material_override})
+	for c in n.get_children():
+		_mm_collect(c, xf, acc)
+
+func _batch_scene(ps: PackedScene, xform: Transform3D) -> void:
+	# вместо instantiate() на каждый объект — копим трансформы, рисуем одним MultiMesh на меш
+	if not _mm_templates.has(ps):
+		var inst := ps.instantiate()
+		var acc: Array = []
+		_mm_collect(inst, Transform3D.IDENTITY, acc)
+		inst.free()
+		_mm_templates[ps] = acc
+	for e in _mm_templates[ps]:
+		var mesh: Mesh = e["mesh"]
+		if not _mm_batches.has(mesh):
+			_mm_batches[mesh] = {"xforms": [], "override": e["override"]}
+		_mm_batches[mesh]["xforms"].append(xform * (e["local"] as Transform3D))
+
+func _yrot_scale(pos: Vector3, rot: float, s: float) -> Transform3D:
+	return Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * s), pos)
+
+func _flush_batches() -> void:
+	# создать MultiMeshInstance3D по каждому мешу — весь лес/декор в ~десяток draw-объектов
+	var total := 0
+	for mesh in _mm_batches:
+		var b: Dictionary = _mm_batches[mesh]
+		var xfs: Array = b["xforms"]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = mesh
+		mm.instance_count = xfs.size()
+		for i in xfs.size():
+			mm.set_instance_transform(i, xfs[i])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		if b["override"] != null:
+			mmi.material_override = b["override"]
+		add_child(mmi)
+		total += xfs.size()
+	print("[mm] батчей: %d, инстансов: %d" % [_mm_batches.size(), total])
+	_mm_templates.clear()
+	_mm_batches.clear()
 
 func _load_tree_scenes(leafy: bool) -> Array:
 	var arr: Array = []
@@ -1733,11 +1757,7 @@ func _tree(pos: Vector3, s: float, leafy: bool = false) -> void:
 		scenes = _load_tree_scenes(leafy)
 	if not scenes.is_empty():
 		var ps: PackedScene = scenes[randi() % scenes.size()]
-		var model: Node3D = ps.instantiate()
-		var ms := s * TREE_SCALE
-		model.scale = Vector3(ms, ms, ms)
-		model.rotation.y = randf() * TAU
-		body.add_child(model)
+		_batch_scene(ps, _yrot_scale(pos, randf() * TAU, s * TREE_SCALE))   # визуал в MultiMesh (перф)
 	else:
 		# запасной примитив (если моделей нет)
 		var trunk := MeshInstance3D.new()
@@ -1767,11 +1787,7 @@ func _rock(pos: Vector3, s: float) -> void:
 			if ResourceLoader.exists(p):
 				_rock_scenes.append(load(p))
 	if not _rock_scenes.is_empty():
-		var m: Node3D = _rock_scenes[randi() % _rock_scenes.size()].instantiate()
-		var ms := s * 1.4
-		m.scale = Vector3(ms, ms, ms)
-		m.rotation.y = randf() * TAU
-		body.add_child(m)
+		_batch_scene(_rock_scenes[randi() % _rock_scenes.size()], _yrot_scale(pos, randf() * TAU, s * 1.4))
 	else:
 		var mesh := MeshInstance3D.new()
 		var sm := SphereMesh.new()
@@ -1795,14 +1811,10 @@ func _rock_cluster(cx: float, cz: float, rng: RandomNumberGenerator) -> void:
 	if _rock_scenes.is_empty():
 		return
 	for j in rng.randi_range(2, 4):
-		var m: Node3D = _rock_scenes[rng.randi() % _rock_scenes.size()].instantiate()
 		var ms := rng.randf_range(0.3, 0.8) * 1.4
-		m.scale = Vector3(ms, ms, ms)
 		var a := rng.randf() * TAU
 		var r := rng.randf_range(1.0, 3.2)
-		m.position = Vector3(cx + cos(a) * r, 0, cz + sin(a) * r)
-		m.rotation.y = rng.randf() * TAU
-		add_child(m)
+		_batch_scene(_rock_scenes[rng.randi() % _rock_scenes.size()], _yrot_scale(Vector3(cx + cos(a) * r, 0, cz + sin(a) * r), rng.randf() * TAU, ms))
 
 func _build_water_and_yacht() -> void:
 	var water := MeshInstance3D.new()
