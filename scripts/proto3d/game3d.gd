@@ -146,6 +146,7 @@ var qp_fill: ColorRect
 var crosshair: ColorRect
 var tutorial_label: Label
 var _tut_t := 9.0
+var _hud_acc := 0.0   # троттлинг HUD на мобиле (10 Гц)
 var paused := false
 var pause_overlay: ColorRect
 var pause_controls: Label
@@ -251,7 +252,8 @@ var _shotwin := false
 var _shot_t := 0.0
 var _shot_saved := false
 var _dbg_clip := ""   # форс-проигрывание клипа для проверочных кадров (--shotidle/walk/run)
-var _mobile := false   # мобильный режим (телефон/мобильный веб): лёгкая графика + тач
+var _mobile := false   # лёгкая графика (телефон ИЛИ ручной lowgfx)
+var _device_mobile := false   # реально телефон (тач-UI); НЕ форсится настройкой графики
 
 func _ready() -> void:
 	var args := OS.get_cmdline_args() + OS.get_cmdline_user_args()
@@ -260,6 +262,7 @@ func _ready() -> void:
 	_autoplay = "--autoplay" in args
 	_touch_flag = "--touch" in args
 	_mobile = ("--mobile" in args) or OS.has_feature("web_android") or OS.has_feature("web_ios") or OS.has_feature("mobile")
+	_device_mobile = _mobile   # реальное устройство-телефон (для тач-UI); _mobile ниже может форситься lowgfx (только графика)
 	_shothut = "--shothut" in args
 	_shotwin = "--shotwin" in args
 	if "--night" in args:
@@ -642,7 +645,8 @@ func _build_environment() -> void:
 	add_child(sun)
 	# луна — второй directional light; ProceduralSkyMaterial рисует её диск в небе (не зависит от тумана)
 	moon = DirectionalLight3D.new()
-	moon.rotation_degrees = Vector3(-13, 180, 0)   # низко над линией деревьев, в направлении обзора (−Z)
+	# свет строго ОТ видимой луны sky-шейдера (moondir = (-0.80, 0.36, -0.20)) — тени/блики согласованы с картинкой
+	moon.basis = Basis.looking_at(Vector3(0.80, -0.36, 0.20).normalized(), Vector3.UP)
 	moon.light_color = Color(0.70, 0.80, 1.0)
 	moon.light_energy = 0.0
 	moon.light_angular_distance = 5.0   # крупный диск = луна
@@ -2803,6 +2807,9 @@ func _toggle_pause() -> void:
 	paused = not paused
 	if pause_overlay != null:
 		pause_overlay.visible = paused
+	if not paused and journal_open and journal_panel != null:
+		journal_open = false
+		journal_panel.visible = false   # иначе дневник залипал на экране при захваченной мыши
 	if paused:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif not show_touch:
@@ -2898,7 +2905,7 @@ func _hotbar_icon(box: Panel, name: String) -> void:
 func _build_touch() -> void:
 	# На web is_touchscreen_available() часто врёт (true на десктопе) → показывал тач-джойстик вместо WASD/мыши.
 	# На web по умолчанию десктоп-управление (клавиатура+мышь); тач — только нативный мобайл или флаг --touch.
-	show_touch = _touch_flag or _mobile or (DisplayServer.is_touchscreen_available() and not OS.has_feature("web"))
+	show_touch = _touch_flag or _device_mobile or (DisplayServer.is_touchscreen_available() and not OS.has_feature("web"))
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	var root := Control.new()
@@ -3224,9 +3231,12 @@ func _process(delta: float) -> void:
 		tutorial_label.modulate.a = clampf(_tut_t / 3.0, 0.0, 1.0)
 		if _tut_t <= 0.0:
 			tutorial_label.visible = false
-	_update_radar()
-	_update_beacons()
-	_refresh_hud()
+	_hud_acc += delta
+	if (not _mobile) or _hud_acc >= 0.1:   # телефон: HUD/радар 10 Гц вместо 60 (строки+StyleBox каждый кадр — дорого)
+		_hud_acc = 0.0
+		_update_radar()
+		_update_beacons()
+		_refresh_hud()
 	if (_shot or _shotin) and not _shot_saved:
 		_shot_t += delta
 		if _shot_t > 1.2:
@@ -3252,7 +3262,7 @@ func _physics_process(delta: float) -> void:
 	_day_night()
 	# с наступлением ночи Тимоха появляется рядом с игроком (угроза не зависит от размера карты)
 	var nownight := _is_night()
-	if nownight and not _was_night and wake <= 0.0:
+	if nownight and not _was_night and wake <= 0.0 and not final_chase:   # в финале не телепортировать — погоня уже идёт
 		var ang := randf() * TAU
 		timokha.global_position = Vector3(player.global_position.x + cos(ang) * 45.0, 1.0, player.global_position.z + sin(ang) * 45.0)
 		_tele = false
@@ -3419,13 +3429,16 @@ func _move_timokha(delta: float) -> void:
 			if _dash:
 				spd = TIMOKHA_DASH
 				timokha_mat.albedo_color = Color(1.0, 0.15, 0.1)
+				_tk_signal(Color(1.0, 0.22, 0.15), 1.6)   # телеграф на 3D-модели: КРАСНАЯ подсветка = рывок
 				tk_state = "РЫВОК!"
 			elif _tele:
 				spd = TIMOKHA_NIGHT * 0.25
 				timokha_mat.albedo_color = Color(1.0, 0.55, 0.1)
+				_tk_signal(Color(1.0, 0.6, 0.15), 1.3)    # ОРАНЖЕВАЯ = готовится (успей отбежать)
 				tk_state = "готовится к рывку..."
 			else:
 				timokha_mat.albedo_color = Color(0.86, 0.25, 0.20)
+				_tk_signal(Color(0.74, 0.84, 1.0), -1.0)  # обычный бледно-лунный (энергию ведёт _day_night)
 				tk_state = "ВИДИТ ТЕБЯ!"
 		else:
 			# далеко или нет прямой видимости — просто неумолимо бежит на игрока, без рывка
@@ -3433,6 +3446,7 @@ func _move_timokha(delta: float) -> void:
 			_dash = false
 			_cd = 5.0
 			timokha_mat.albedo_color = Color(0.86, 0.25, 0.20)
+			_tk_signal(Color(0.74, 0.84, 1.0), -1.0)
 			tk_state = "идёт на тебя..."
 	else:
 		_tele = false
@@ -3477,6 +3491,14 @@ func _move_timokha(delta: float) -> void:
 	if hdir.length() > 0.1:
 		timokha.look_at(timokha.global_position + hdir, Vector3.UP)
 	_animate_timokha(delta)
+
+func _tk_signal(col: Color, min_energy: float) -> void:
+	# сигнал состояния на 3D-модели через подсветку (albedo timokha_mat работает только на примитиве-фоллбеке)
+	if tk_glow == null:
+		return
+	tk_glow.light_color = col
+	if min_energy > 0.0:
+		tk_glow.light_energy = maxf(tk_glow.light_energy, min_energy)   # телеграф виден и днём (финальная погоня)
 
 func _animate_timokha(delta: float) -> void:
 	# 3D-модель: анимацию бега ведёт AnimationPlayer; скорость воспроизведения растёт с движением
@@ -3668,7 +3690,7 @@ func _check_catch() -> void:
 			return
 		lives -= 1
 		js_cd = 0.0                       # сбросить кулдаун — поимка всегда даёт джампскейр
-		_jumpscare(0.6, 1.0, snd_caught)  # ТРИГГЕР: поимка — лицо на весь экран
+		_jumpscare(0.6, 1.0, null)        # ТРИГГЕР: поимка — лицо на весь экран (snd_caught уже сыгран выше, не перезапускать)
 		if lives > 0:
 			# мягкий проигрыш: быстрый респаун у избы, передышка — петля продолжается (детям не обидно)
 			_soft_respawn()
