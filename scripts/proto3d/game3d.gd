@@ -3276,7 +3276,7 @@ func _physics_process(delta: float) -> void:
 	var nownight := _is_night()
 	if nownight and not _was_night and wake <= 0.0 and not final_chase:   # в финале не телепортировать — погоня уже идёт
 		var ang := randf() * TAU
-		timokha.global_position = Vector3(player.global_position.x + cos(ang) * 45.0, 1.0, player.global_position.z + sin(ang) * 45.0)
+		timokha.global_position = _clamp_world(Vector3(player.global_position.x + cos(ang) * 45.0, 1.0, player.global_position.z + sin(ang) * 45.0))
 		_tele = false
 		_dash = false
 		_cd = 2.5
@@ -3362,6 +3362,12 @@ func _day_night() -> void:
 func _is_night() -> bool:
 	return fmod(clock, DAY_LEN) / DAY_LEN > 0.52
 
+func _clamp_world(p: Vector3, margin: float = 8.0) -> Vector3:
+	# удержать точку ВНУТРИ периметровых стен (стены на ±(WORLD-2)) —
+	# телепорты «игрок + N метров» у края карты выкидывали Мишганчика ЗА стену, где он застревал
+	var e := WORLD - margin
+	return Vector3(clampf(p.x, -e, e), p.y, clampf(p.z, -e, e))
+
 func _move_player(delta: float) -> void:
 	var fb := 0.0
 	var lr := 0.0
@@ -3402,6 +3408,9 @@ func _move_player(delta: float) -> void:
 func _move_timokha(delta: float) -> void:
 	if _shot or _shotin:
 		return   # заморозка для скриншотов (иначе уходит с поставленной точки)
+	# страховка: если каким-то путём оказался за периметровой стеной — вернуть внутрь (иначе застревает навсегда)
+	if absf(timokha.global_position.x) > WORLD - 2.0 or absf(timokha.global_position.z) > WORLD - 2.0:
+		timokha.global_position = _clamp_world(timokha.global_position)
 	# ДНЁМ (и в грейс) — пассивен, бродит у избы (безопасно делать дела).
 	# НОЧЬЮ — охотится: телеграф-рывок, может поймать.
 	var hunting := (_is_night() and wake <= 0.0) or (final_chase and wake <= 0.0)
@@ -3697,7 +3706,7 @@ func _check_catch() -> void:
 		if _autoplay:
 			# тест-харнесс: отброс Мишганчика далеко, измеряем полную петлю
 			var ang := randf() * TAU
-			timokha.global_position = player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 52.0
+			timokha.global_position = _clamp_world(player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 52.0)
 			wake = 4.0
 			return
 		lives -= 1
@@ -3722,7 +3731,7 @@ func _soft_respawn() -> void:
 		player.global_position = Vector3(0, 1.0, 16)   # обычная ночь — назад к избе (укрытие)
 	# в финальной погоне игрок остаётся на месте (не терять ~200м пути к яхте) — только отброс охотника
 	var ang := randf() * TAU
-	timokha.global_position = player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 60.0
+	timokha.global_position = _clamp_world(player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 60.0)
 	wake = 3.5            # передышка: охота не ловит, пока отрываешься (сердечки обновятся в _refresh_hud)
 
 func _revive() -> void:
@@ -3768,7 +3777,7 @@ func _start_final_chase() -> void:
 		return
 	final_chase = true
 	_chase_started = true
-	timokha.global_position = player.global_position + player.global_transform.basis.z * 34.0
+	timokha.global_position = _clamp_world(player.global_position + player.global_transform.basis.z * 34.0)
 	timokha.global_position.y = 1.0
 	timokha.look_at(player.global_position, Vector3.UP)
 	wake = 0.0
