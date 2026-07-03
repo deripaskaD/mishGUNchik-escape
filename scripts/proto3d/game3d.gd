@@ -205,6 +205,7 @@ var _js_prox_armed := true   # триггер близости перезаря�
 var _js_glimpse_t := 8.0     # таймер случайного «мелька» ночью
 var win_overlay: ColorRect
 var win_label: Label
+var title_root: Control   # тайтл-экран (Играть/Графика/Дневник) — показывается на старте
 
 # мини-карта-радар
 var radar: Control
@@ -297,9 +298,9 @@ func _ready() -> void:
 	_build_audio()
 	_build_touch()
 	_build_radar()
+	_build_title()
 	space = get_world_3d().direct_space_state
-	if not (_shot or _shotin):
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # захват мыши — по кнопке «Играть» (решение о тайтле — в КОНЦЕ _ready, после разбора --shot* флагов)
 	if _shotin:
 		player.global_position = Vector3(0, 1.0, 1.0)
 	if _shot:
@@ -352,8 +353,15 @@ func _ready() -> void:
 	if "--shotpause" in args:
 		_shot = true
 		paused = true
+		if title_root != null:
+			title_root.visible = false
 		if pause_overlay != null:
 			pause_overlay.visible = true
+	if "--shottitle" in args:
+		_shot = true
+		paused = true
+		if title_root != null:
+			title_root.visible = true
 	if "--shotdock" in args:
 		_shot = true
 		player.global_position = Vector3(10, 1.5, 186)
@@ -433,10 +441,10 @@ func _ready() -> void:
 			pause_controls.text = "Управление: левый джойстик — идти · правая зона свайп — камера\nкнопки БЕГ / ПРЫЖОК · кнопка ❚❚ — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
 		else:
 			pause_controls.text = "Управление: WASD — идти · Shift — бег · мышь — осмотр\nSpace — прыжок · Esc — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
-	if _new_daily and done_label != null:
-		done_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
-		done_label.text = "Награда дня! Серия: %d дн.  +%d жизни сегодня" % [streak, daily_bonus]
-		done_t = 4.5
+	# реальный игрок (не скриншот/не автоплей): показать тайтл-экран, мир на паузе до «Играть»
+	if not (_shot or _shotin or _autoplay):
+		title_root.visible = true
+		paused = true
 
 func _mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -2815,6 +2823,107 @@ func _save_game() -> void:
 		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx}))
 		f.close()
 
+func _build_title() -> void:
+	# тайтл-экран: заголовок + Мишганчик + Играть/Графика/Дневник (детям привычнее меню; мышь захватываем по «Играть»)
+	var layer := CanvasLayer.new()
+	layer.layer = 5   # поверх игрового HUD
+	add_child(layer)
+	title_root = ColorRect.new()
+	title_root.color = Color(0.05, 0.07, 0.12, 0.92)
+	title_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	title_root.visible = false
+	layer.add_child(title_root)
+	var vp := get_viewport().get_visible_rect().size
+	var t1 := Label.new()
+	t1.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	t1.offset_top = vp.y * 0.14
+	t1.offset_bottom = vp.y * 0.14 + 70
+	t1.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t1.add_theme_font_size_override("font_size", 56)
+	t1.add_theme_color_override("font_color", Color(1.0, 0.9, 0.45))
+	t1.add_theme_color_override("font_outline_color", Color(0.25, 0.1, 0.05))
+	t1.add_theme_constant_override("outline_size", 12)
+	t1.text = "ПОБЕГ ОТ МИШГАНЧИКА"
+	title_root.add_child(t1)
+	var t2 := Label.new()
+	t2.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	t2.offset_top = vp.y * 0.14 + 74
+	t2.offset_bottom = vp.y * 0.14 + 104
+	t2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t2.add_theme_font_size_override("font_size", 19)
+	t2.add_theme_color_override("font_color", Color(0.8, 0.85, 0.95))
+	t2.text = "Днём делай дела. Ночью — беги. Почини яхту и сбеги с острова!"
+	title_root.add_child(t2)
+	# Мишганчик сбоку (узнаваемость + лёгкая жуть)
+	if ResourceLoader.exists("res://art/mishganchik.png"):
+		var face := TextureRect.new()
+		face.texture = load("res://art/mishganchik.png")
+		face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+		face.size = Vector2(150, 477)
+		face.position = Vector2(vp.x * 0.78, vp.y * 0.30)
+		face.rotation = 0.06
+		face.modulate = Color(0.85, 0.85, 0.9)
+		title_root.add_child(face)
+	var bplay := Button.new()
+	bplay.text = "ИГРАТЬ"
+	bplay.size = Vector2(280, 68)
+	bplay.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42)
+	_style_button(bplay, Color(0.24, 0.62, 0.34), 30)
+	bplay.pressed.connect(_start_game)
+	title_root.add_child(bplay)
+	var bgfx := Button.new()
+	bgfx.text = "Графика: Низ" if lowgfx else "Графика: Выс"
+	bgfx.size = Vector2(280, 56)
+	bgfx.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 82)
+	_style_button(bgfx, Color(0.3, 0.5, 0.5))
+	bgfx.pressed.connect(_title_toggle_gfx)
+	title_root.add_child(bgfx)
+	var bjournal := Button.new()
+	bjournal.text = "Дневник (%d/%d)" % [lore_found.size(), LORE.size()]
+	bjournal.size = Vector2(280, 56)
+	bjournal.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 150)
+	_style_button(bjournal, Color(0.45, 0.36, 0.62))
+	bjournal.pressed.connect(_toggle_journal)
+	title_root.add_child(bjournal)
+	if streak > 0:
+		var st := Label.new()
+		st.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		st.offset_top = vp.y * 0.42 + 218
+		st.offset_bottom = vp.y * 0.42 + 244
+		st.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		st.add_theme_font_size_override("font_size", 17)
+		st.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
+		st.text = "Серия: %d дн. · бонус +%d жизни сегодня" % [streak, daily_bonus]
+		title_root.add_child(st)
+	# дневник — выше тайтла (иначе открывался бы ПОД ним)
+	if journal_panel != null:
+		var jl := CanvasLayer.new()
+		jl.layer = 6
+		add_child(jl)
+		journal_panel.reparent(jl)
+
+func _start_game() -> void:
+	if title_root != null:
+		title_root.visible = false
+	paused = false
+	_tut_t = 9.0   # туториал стартует с нажатия «Играть» (не горит под тайтлом)
+	if tutorial_label != null:
+		tutorial_label.visible = true
+		tutorial_label.modulate.a = 1.0
+	if not show_touch:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if _new_daily and done_label != null:
+		done_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
+		done_label.text = "Награда дня! Серия: %d дн.  +%d жизни сегодня" % [streak, daily_bonus]
+		done_t = 4.5
+
+func _title_toggle_gfx() -> void:
+	# на тайтле мир ещё «не начат» — применяем графику сразу перезагрузкой сцены
+	lowgfx = not lowgfx
+	_save_game()
+	get_tree().reload_current_scene()
+
 func _toggle_pause() -> void:
 	paused = not paused
 	if pause_overlay != null:
@@ -3128,6 +3237,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		pitch = clampf(pitch - event.relative.y * 0.0035, -1.4, 1.4)
 		cam.rotation.x = pitch
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if title_root != null and title_root.visible:
+			return   # на тайтле Esc не трогает паузу (игра стартует кнопкой «Играть»)
 		if won:
 			get_tree().quit()
 		else:
