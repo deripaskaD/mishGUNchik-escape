@@ -3,6 +3,8 @@ extends Node3D
 ## изба человеческого размера с интерьером (котёл), квесты разбросаны по карте,
 ## Тимоха гонится, день/ночь, дождь. Примитивы-плейсхолдеры (заменяемы на 3D-модели).
 
+const CC := preload("res://scripts/proto3d/chaser_config.gd")   # СМЕННЫЙ МОДУЛЬ персонажа/бренда — вся замена маскота там
+
 const WORLD := 220.0          # полупролёт карты (440x440 м) — большой лес
 const TREES := 2400         # очень густой лес (на мобиле /3)
 const TREE_SCALE := 5.2     # крупные GLB-деревья Kenney (густой высокий лес)
@@ -19,11 +21,11 @@ const JUMP := 7.5
 const CATCH_DIST := 1.7
 const STUN := 0.8
 const DAY_LEN := 95.0         # длительность суток (сек)
-const TIMOKHA_SPEED := 4.4
-const TIMOKHA_NIGHT := 7.2     # быстрее ходьбы (6.2), медленнее спринта (9.6) — стой/делай дела = опасно, беги спринтом
-const TIMOKHA_DASH := 10.8     # рывок чуть быстрее спринта — страшные моменты
-const WAKE_TIME := 18.0       # грейс перед началом охоты
-const TK_MODEL_SCALE := 1.18  # модель ~1.87 м → ~2.2 м (нависающий антагонист)
+# параметры преследователя — единый источник: chaser_config.gd (смена маскота без правок логики)
+const TIMOKHA_NIGHT := CC.SPEED_NIGHT
+const TIMOKHA_DASH := CC.SPEED_DASH
+const WAKE_TIME := CC.WAKE_TIME
+const TK_MODEL_SCALE := CC.MODEL_SCALE
 
 var player: CharacterBody3D
 var cam: Camera3D
@@ -157,12 +159,12 @@ var pause_controls: Label
 const LORE := [
 	"Дневник, день 1. Все уехали с острова на большой лодке. Меня не взяли — сказали, вернутся к утру.",
 	"День 9. Лодка так и не вернулась. Туман не уходит уже неделю. Ночью кто-то ходит вокруг избы.",
-	"Старики звали его Мишганчик — сторож острова. Я думал, это просто страшилка для детей.",
+	"Старики звали его {N} — сторож острова. Я думал, это просто страшилка для детей.",
 	"День 20. Я больше не один. Он не злой… просто не хочет, чтобы кто-то уплывал. Боится остаться совсем один.",
 	"У идола вырезано: «Кто построит лодку — разбудит сторожа. Кто уплывёт — освободит его».",
 	"Под мельницей — старый колодец. На дне виден свет. Туда уходили те, кто пытался сбежать…",
 	"День 40. Яхта почти готова. Если читаешь это — ночью только БЕГИ. Он быстрее, когда ты стоишь.",
-	"Я уплыл. Но в тумане за островом горят ещё огни. Мишганчик был не единственным сторожем… (продолжение следует)",
+	"Я уплыл. Но в тумане за островом горят ещё огни. {N} был не единственным сторожем… (продолжение следует)",
 ]
 var note_panel: Panel
 var note_label: Label
@@ -180,6 +182,8 @@ var daily_bonus := 0
 var _save_day := 0
 var _new_daily := false
 var lowgfx := false   # ручной режим «Графика: Низ» (сохраняется) — форсит мобильные оптимизации
+var noads := false    # IAP «убрать рекламу» (заглушка; сохраняется; за родительским гейтом)
+var ads: Node         # каркас монетизации (scripts/proto3d/ads.gd) — реальный SDK подключается там
 var window_mats: Array = []
 var snd_btn: Button
 var gfx_btn: Button
@@ -276,6 +280,10 @@ func _ready() -> void:
 		print("[autoplay] start")
 	if not _autoplay:
 		_load_save()   # стрик/бонус-жизни/дневник/lowgfx до постройки HUD
+	ads = preload("res://scripts/proto3d/ads.gd").new()
+	ads.ads_removed = noads
+	ads.rewarded_done.connect(_on_rewarded)
+	add_child(ads)
 	if lowgfx:
 		_mobile = true   # ручной режим «Графика: Низ» форсит все мобильные оптимизации на любом устройстве
 	if _mobile:
@@ -2051,8 +2059,8 @@ func _make_timokha() -> void:
 	shmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	shadow.material_override = shmat
 	timokha.add_child(shadow)
-	var model_path := "res://art/models/character/mishganchik.fbx"
-	var tex_path := "res://art/mishganchik.png"
+	var model_path := CC.MODEL_PATH
+	var tex_path := CC.BILLBOARD_TEX
 	if ResourceLoader.exists(model_path):
 		# реальная 3D-модель со скелетом и анимацией бега
 		var ps: PackedScene = load(model_path)
@@ -2073,11 +2081,11 @@ func _make_timokha() -> void:
 					var clip: Animation = tk_anim.get_animation(nm)
 					clip.loop_mode = Animation.LOOP_LINEAR   # все клипы зациклены
 					var low := String(nm).to_lower()
-					if tk_clip_idle == "" and (low.contains("idle") or low.contains("stand") or low.contains("tpose") or low.contains("rest")):
+					if tk_clip_idle == "" and _has_hint(low, CC.CLIP_HINTS_IDLE):
 						tk_clip_idle = nm
-					elif tk_clip_walk == "" and low.contains("walk"):
+					elif tk_clip_walk == "" and _has_hint(low, CC.CLIP_HINTS_WALK):
 						tk_clip_walk = nm
-					elif tk_clip_run == "" and (low.contains("run") or low.contains("jog") or low.contains("sprint") or low.contains("chase")):
+					elif tk_clip_run == "" and _has_hint(low, CC.CLIP_HINTS_RUN):
 						tk_clip_run = nm
 				if tk_clip_run == "":
 					tk_clip_run = tk_anim_name   # клип из основного FBX = бег
@@ -2100,7 +2108,7 @@ func _make_timokha() -> void:
 		# жуткая холодная подсветка — заметен ночью (когда охотится), днём выключена
 		tk_glow = OmniLight3D.new()
 		tk_glow.position = Vector3(0, 1.45, -0.6)   # спереди-сверху (−Z = look_at к игроку) → мягко освещает всё тело
-		tk_glow.light_color = Color(0.74, 0.84, 1.0)   # бледно-лунный, нездоровый
+		tk_glow.light_color = CC.GLOW_COLOR   # бледно-лунный, нездоровый
 		tk_glow.omni_range = 9.0
 		tk_glow.omni_attenuation = 0.5   # пологое затухание = ровный мягкий свет, без горячего пятна/bloom
 		tk_glow.light_energy = 0.0
@@ -2204,7 +2212,7 @@ func _build_quests() -> void:
 	_add_quest("wood2", Vector3(-110, 0, -130), "Наруби дров (2)", "wood")
 	_add_quest("herb1", Vector3(-85, 0, 75), "Собери травы (1)", "herb")
 	_add_quest("herb2", Vector3(130, 0, 100), "Собери травы (2)", "herb")
-	_add_quest("cucumber", Vector3(160, 0, -55), "Накорми Мишганчика огурцом", "task")
+	_add_quest("cucumber", Vector3(160, 0, -55), "Накорми %s огурцом" % CC.NAME_GEN, "task")
 	_add_quest("water", Vector3(-170, 0, -45), "Набери воды Гене", "task")
 	_add_quest("berries", Vector3(55, 0, 170), "Набери ягод", "task")
 	_add_quest("mushroom", Vector3(-60, 0, -185), "Собери грибы", "task")
@@ -2524,7 +2532,7 @@ void fragment() {
 	chase_banner.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
 	chase_banner.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	chase_banner.add_theme_constant_override("outline_size", 8)
-	chase_banner.text = "БЕГИ К ЯХТЕ — МИШГАНЧИК ГОНИТСЯ!"
+	chase_banner.text = "БЕГИ К ЯХТЕ — %s ГОНИТСЯ!" % CC.NAME.to_upper()
 	chase_banner.visible = false
 	layer.add_child(chase_banner)
 	# ── оверлей джампскейра (поверх игрового HUD) ──
@@ -2544,8 +2552,8 @@ void fragment() {
 	js_face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	js_face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	js_face.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if ResourceLoader.exists("res://art/mishganchik.png"):
-		js_face.texture = load("res://art/mishganchik.png")
+	if ResourceLoader.exists(CC.BILLBOARD_TEX):
+		js_face.texture = load(CC.BILLBOARD_TEX)
 	js_root.add_child(js_face)
 	# квест-зона: карточка «ЦЕЛЬ» — единый фокус внимания (компас+дело), верх-центр
 	quest_card = Panel.new()
@@ -2651,7 +2659,7 @@ void fragment() {
 	revive_btn.position = Vector2(vp.x * 0.5 - 150, vp.y - 230)
 	_style_button(revive_btn, Color(0.82, 0.6, 0.16))   # золотой — выделяется
 	revive_btn.visible = false
-	revive_btn.pressed.connect(_revive)
+	revive_btn.pressed.connect(_revive_via_ad)
 	layer.add_child(revive_btn)
 	win_quit_btn = Button.new()
 	win_quit_btn.text = "Выход"
@@ -2761,7 +2769,7 @@ void fragment() {
 func _reveal_note() -> void:
 	if lore_idx >= LORE.size():
 		return
-	var txt: String = LORE[lore_idx]
+	var txt: String = LORE[lore_idx].format({"N": CC.NAME})
 	lore_found.append(txt)
 	lore_idx += 1
 	if note_panel != null and note_label != null:
@@ -2778,7 +2786,7 @@ func _toggle_journal() -> void:
 	if journal_open:
 		var s := ""
 		if lore_found.is_empty():
-			s = "Записок пока нет.\nВыполняй дневные дела — и узнаешь, кто такой Мишганчик и почему он не выпускает с острова…"
+			s = "Записок пока нет.\nВыполняй дневные дела — и узнаешь, кто такой %s и почему он не выпускает с острова…" % CC.NAME
 		else:
 			for i in lore_found.size():
 				s += "— %s\n\n" % lore_found[i]
@@ -2802,6 +2810,7 @@ func _load_save() -> void:
 	daily_bonus = int(data.get("bonus", 0))
 	_save_day = int(data.get("day", 0))
 	lowgfx = bool(data.get("lowgfx", false))
+	noads = bool(data.get("noads", false))
 	lore_idx = clampi(int(data.get("lore", 0)), 0, LORE.size())
 	lore_found.clear()
 	for i in lore_idx:
@@ -2820,7 +2829,7 @@ func _save_game() -> void:
 		return   # тест/скриншот-режимы не пишут сейв
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f != null:
-		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx}))
+		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads}))
 		f.close()
 
 func _build_title() -> void:
@@ -2843,7 +2852,7 @@ func _build_title() -> void:
 	t1.add_theme_color_override("font_color", Color(1.0, 0.9, 0.45))
 	t1.add_theme_color_override("font_outline_color", Color(0.25, 0.1, 0.05))
 	t1.add_theme_constant_override("outline_size", 12)
-	t1.text = "ПОБЕГ ОТ МИШГАНЧИКА"
+	t1.text = CC.GAME_TITLE.to_upper()
 	title_root.add_child(t1)
 	var t2 := Label.new()
 	t2.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -2855,9 +2864,9 @@ func _build_title() -> void:
 	t2.text = "Днём делай дела. Ночью — беги. Почини яхту и сбеги с острова!"
 	title_root.add_child(t2)
 	# Мишганчик сбоку (узнаваемость + лёгкая жуть)
-	if ResourceLoader.exists("res://art/mishganchik.png"):
+	if ResourceLoader.exists(CC.BILLBOARD_TEX):
 		var face := TextureRect.new()
-		face.texture = load("res://art/mishganchik.png")
+		face.texture = load(CC.BILLBOARD_TEX)
 		face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
 		face.size = Vector2(150, 477)
@@ -2886,16 +2895,32 @@ func _build_title() -> void:
 	_style_button(bjournal, Color(0.45, 0.36, 0.62))
 	bjournal.pressed.connect(_toggle_journal)
 	title_root.add_child(bjournal)
+	var bnoads := Button.new()
+	bnoads.text = "Реклама отключена" if noads else "Убрать рекламу"
+	bnoads.size = Vector2(280, 50)
+	bnoads.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 218)
+	_style_button(bnoads, Color(0.55, 0.44, 0.2), 20)
+	bnoads.pressed.connect(_noads_pressed.bind(bnoads))
+	title_root.add_child(bnoads)
 	if streak > 0:
 		var st := Label.new()
 		st.set_anchors_preset(Control.PRESET_TOP_WIDE)
-		st.offset_top = vp.y * 0.42 + 218
-		st.offset_bottom = vp.y * 0.42 + 244
+		st.offset_top = vp.y * 0.42 + 280
+		st.offset_bottom = vp.y * 0.42 + 306
 		st.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		st.add_theme_font_size_override("font_size", 17)
 		st.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
 		st.text = "Серия: %d дн. · бонус +%d жизни сегодня" % [streak, daily_bonus]
 		title_root.add_child(st)
+	# кросс-промо серии: «Ещё игры» (виден только когда в конфиге задан URL)
+	if CC.MORE_GAMES_URL != "":
+		var bmore := Button.new()
+		bmore.text = "Ещё игры"
+		bmore.size = Vector2(170, 46)
+		bmore.position = Vector2(24, vp.y - 70)
+		_style_button(bmore, Color(0.26, 0.5, 0.8), 19)
+		bmore.pressed.connect(func(): OS.shell_open(CC.MORE_GAMES_URL))
+		title_root.add_child(bmore)
 	# дневник — выше тайтла (иначе открывался бы ПОД ним)
 	if journal_panel != null:
 		var jl := CanvasLayer.new()
@@ -2917,6 +2942,66 @@ func _start_game() -> void:
 		done_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
 		done_label.text = "Награда дня! Серия: %d дн.  +%d жизни сегодня" % [streak, daily_bonus]
 		done_t = 4.5
+
+func _noads_pressed(btn: Button) -> void:
+	if noads:
+		# вернуть рекламу можно без гейта (безопасное действие)
+		noads = false
+		ads.ads_removed = false
+		_save_game()
+		btn.text = "Убрать рекламу"
+		return
+	_parental_gate(func():
+		# ЗАГЛУШКА ПОКУПКИ: реальный IAP подключает пользователь (здесь только флаг).
+		noads = true
+		ads.ads_removed = true
+		_save_game()
+		btn.text = "Реклама отключена"
+	)
+
+func _parental_gate(on_ok: Callable) -> void:
+	# родительский гейт (COPPA/Families): взрослое действие подтверждается умножением
+	var layer := CanvasLayer.new()
+	layer.layer = 7
+	add_child(layer)
+	var root := ColorRect.new()
+	root.color = Color(0.04, 0.05, 0.09, 0.94)
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(root)
+	var vp := get_viewport().get_visible_rect().size
+	var a := randi_range(6, 9)
+	var b := randi_range(6, 9)
+	var q := Label.new()
+	q.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	q.offset_top = vp.y * 0.30
+	q.offset_bottom = vp.y * 0.30 + 70
+	q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	q.add_theme_font_size_override("font_size", 26)
+	q.add_theme_color_override("font_color", Color(0.95, 0.95, 1.0))
+	q.text = "Вопрос для родителей:\nсколько будет %d × %d?" % [a, b]
+	root.add_child(q)
+	var answers := [a * b, a * b + randi_range(2, 5), a * b - randi_range(2, 5)]
+	answers.shuffle()
+	for i in answers.size():
+		var ab := Button.new()
+		ab.text = str(answers[i])
+		ab.size = Vector2(110, 56)
+		ab.position = Vector2(vp.x * 0.5 - 185 + i * 130, vp.y * 0.30 + 100)
+		_style_button(ab, Color(0.3, 0.45, 0.6))
+		var val: int = answers[i]
+		ab.pressed.connect(func():
+			layer.queue_free()
+			if val == a * b:
+				on_ok.call()
+		)
+		root.add_child(ab)
+	var cancel := Button.new()
+	cancel.text = "Отмена"
+	cancel.size = Vector2(160, 48)
+	cancel.position = Vector2(vp.x * 0.5 - 80, vp.y * 0.30 + 180)
+	_style_button(cancel, Color(0.42, 0.32, 0.38), 20)
+	cancel.pressed.connect(func(): layer.queue_free())
+	root.add_child(cancel)
 
 func _title_toggle_gfx() -> void:
 	# на тайтле мир ещё «не начат» — применяем графику сразу перезагрузкой сцены
@@ -3393,15 +3478,17 @@ func _physics_process(delta: float) -> void:
 		_cd = 2.5
 		last_seen = player.global_position
 		_play(snd_stinger)
+		if ads != null and not _autoplay:
+			ads.show_interstitial("night")
 		if not _autoplay:
 			_jumpscare(0.4, 0.75, null)   # ТРИГГЕР: наступила ночь — короткая вспышка лица (стингер уже играет)
 		if done_label != null:
 			done_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.35))
-			done_label.text = "НОЧЬ! Мишганчик рядом — беги!"
+			done_label.text = "НОЧЬ! %s рядом — беги!" % CC.NAME
 			done_t = 1.9
 	if (not nownight) and _was_night and done_label != null:   # рассвет — облегчение
 		done_label.add_theme_color_override("font_color", Color(0.5, 1.0, 0.6))
-		done_label.text = "Рассвет — Мишганчик ушёл, делай дела"
+		done_label.text = "Рассвет — %s ушёл, делай дела" % CC.NAME
 		done_t = 2.0
 	_was_night = nownight
 	# периодическое уханье совы ночью
@@ -3570,7 +3657,7 @@ func _move_timokha(delta: float) -> void:
 				tk_state = "готовится к рывку..."
 			else:
 				timokha_mat.albedo_color = Color(0.86, 0.25, 0.20)
-				_tk_signal(Color(0.74, 0.84, 1.0), -1.0)  # обычный бледно-лунный (энергию ведёт _day_night)
+				_tk_signal(CC.GLOW_COLOR, -1.0)  # обычный бледно-лунный (энергию ведёт _day_night)
 				tk_state = "ВИДИТ ТЕБЯ!"
 		else:
 			# далеко или нет прямой видимости — просто неумолимо бежит на игрока, без рывка
@@ -3578,7 +3665,7 @@ func _move_timokha(delta: float) -> void:
 			_dash = false
 			_cd = 5.0
 			timokha_mat.albedo_color = Color(0.86, 0.25, 0.20)
-			_tk_signal(Color(0.74, 0.84, 1.0), -1.0)
+			_tk_signal(CC.GLOW_COLOR, -1.0)
 			tk_state = "идёт на тебя..."
 	else:
 		_tele = false
@@ -3623,6 +3710,12 @@ func _move_timokha(delta: float) -> void:
 	if hdir.length() > 0.1:
 		timokha.look_at(timokha.global_position + hdir, Vector3.UP)
 	_animate_timokha(delta)
+
+func _has_hint(s: String, hints: Array) -> bool:
+	for h in hints:
+		if s.contains(h):
+			return true
+	return false
 
 func _tk_signal(col: Color, min_energy: float) -> void:
 	# сигнал состояния на 3D-модели через подсветку (albedo timokha_mat работает только на примитиве-фоллбеке)
@@ -3728,6 +3821,8 @@ func _update_quests(delta: float) -> void:
 						catch_flash.color = Color(0.2, 1.0, 0.4, 0.0)
 						flash_v = 0.5
 					_reveal_note()   # дневное дело → раскрыть следующую записку лора
+					if ads != null and not _autoplay:
+						ads.show_interstitial("quest_done")
 					if done_label != null:
 						done_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.55))
 						done_label.text = str(q["label"]) + " — готово!"
@@ -3826,9 +3921,11 @@ func _check_catch() -> void:
 		if lives > 0:
 			# мягкий проигрыш: быстрый респаун у избы, передышка — петля продолжается (детям не обидно)
 			_soft_respawn()
+			if ads != null and not _autoplay:
+				ads.show_interstitial("catch")
 			if done_label != null:
 				done_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.45))
-				done_label.text = "Мишганчик схватил! Жизней осталось: %d" % lives
+				done_label.text = "%s схватил! Жизней осталось: %d" % [CC.NAME, lives]
 				done_t = 2.2
 		else:
 			lost = true                   # жизни кончились → экран конца (воскрешение/рестарт)
@@ -3845,9 +3942,24 @@ func _soft_respawn() -> void:
 	timokha.global_position = _clamp_world(player.global_position + Vector3(cos(ang), 0.0, sin(ang)) * 60.0)
 	wake = 3.5            # передышка: охота не ловит, пока отрываешься (сердечки обновятся в _refresh_hud)
 
+func _revive_via_ad() -> void:
+	# «Воскреснуть (реклама)»: rewarded-ролик → награда в _on_rewarded.
+	# С заглушкой награда мгновенная (как раньше); с реальным SDK — после досмотра ролика.
+	if ads != null:
+		ads.show_rewarded("revive")
+	else:
+		_revive()
+
+func _on_rewarded(tag: String, _ok: bool) -> void:
+	if not _ok:
+		return
+	match tag:
+		"revive":
+			_revive()
+		# "hint" / "flashlight" / "skip" — резервные награды (см. scripts/proto3d/ads.gd)
+
 func _revive() -> void:
-	# «воскрешение за рекламу» — ЗАГЛУШКА: реальный рекламный SDK подключает пользователь.
-	# Сейчас просто восстанавливает забег один раз (без показа рекламы).
+	# фактическое воскрешение (выдаётся ТОЛЬКО через _on_rewarded)
 	_revived = true
 	lost = false
 	lives = 1
@@ -3941,7 +4053,7 @@ func _refresh_hud() -> void:
 			win_overlay.visible = true
 			win_label.visible = true
 			win_label.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
-			win_label.text = "МИШГАНЧИК ПОЙМАЛ ТЕБЯ!\n\nПродержался ночей: %d · дел: %d/%d" % [nights, quests_done, quests.size()]
+			win_label.text = "%s ПОЙМАЛ ТЕБЯ!\n\nПродержался ночей: %d · дел: %d/%d" % [CC.NAME.to_upper(), nights, quests_done, quests.size()]
 		if revive_btn != null:
 			revive_btn.visible = not _revived   # воскрешение «за рекламу» — один раз за забег
 		if restart_btn != null:
@@ -3966,7 +4078,7 @@ func _refresh_hud() -> void:
 	var phase := ""
 	var pcol := Color(0.72, 1.0, 0.75)
 	if wake > 0.0:
-		phase = "Мишганчик спит: %0.0f" % wake
+		phase = "%s спит: %0.0f" % [CC.NAME, wake]
 		pcol = Color(1.0, 0.9, 0.5)
 	elif t <= 0.52:
 		phase = "ДЕНЬ · до ночи %0.0f" % ((0.52 - t) * DAY_LEN)
@@ -4029,19 +4141,19 @@ func _build_audio() -> void:
 	snd_rain = _make_audio_player(_load_wav("rain", true), -26.0)
 	snd_heart = _make_audio_player(_load_wav("heartbeat", false), -5.0)
 	snd_ding = _make_audio_player(_load_wav("ding", false), -7.0)
-	snd_caught = _make_audio_player(_load_wav("caught", false), -3.0)
+	snd_caught = _make_audio_player(_load_wav(CC.SND_CAUGHT, false), -3.0)
 	snd_win = _make_audio_player(_load_wav("win", false), -3.0)
 	snd_step1 = _make_audio_player(_load_wav("step1", false), -11.0)
 	snd_step2 = _make_audio_player(_load_wav("step2", false), -11.0)
 	snd_wind = _make_audio_player(_load_wav("wind", true), -30.0)
 	snd_stinger = _make_audio_player(_load_wav("stinger", false), -3.0)
-	snd_laugh = _make_audio_player(_load_wav("laugh", false), -5.0)
+	snd_laugh = _make_audio_player(_load_wav(CC.SND_LAUGH, false), -5.0)
 	snd_crickets = _make_audio_player(_load_wav("crickets", true), -60.0)   # громкость растёт ночью (в _day_night)
 	snd_owl = _make_audio_player(_load_wav("owl", false), -16.0)
 	snd_thunder = _make_audio_player(_load_wav("thunder", false), -7.0)
 	snd_dread = _make_audio_player(_load_wav("dread", true), -60.0)   # громкость рулится в _audio_tick (саспенс)
-	snd_boom = _make_audio_player(_load_wav("boom", false), -2.0)     # мемный «вайн-бум» на джампскейрах
-	snd_spotted = _make_audio_player(_load_wav("honk", false), -6.0)  # дурацкий гудок «заметил тебя»
+	snd_boom = _make_audio_player(_load_wav(CC.SND_BOOM, false), -2.0)     # мемный «вайн-бум» на джампскейрах
+	snd_spotted = _make_audio_player(_load_wav(CC.SND_SPOTTED, false), -6.0)  # дурацкий гудок «заметил тебя»
 	if snd_rain.stream != null:
 		snd_rain.play()
 	if snd_wind != null and snd_wind.stream != null:
