@@ -220,6 +220,13 @@ var space: PhysicsDirectSpaceState3D
 
 # материалы
 var m_ground: Material
+# Roblox-стиль (CC.BLOCKY): общие меши/материалы блочного мира — весь лес в несколько MultiMesh-батчей
+var _bm_trunk: CylinderMesh
+var _bm_cube: BoxMesh
+var m_trunk_blocky: StandardMaterial3D
+var m_crowns: Array = []
+var m_bush_v: Array = []
+var m_rock_v: Array = []
 var _path_shader: Shader   # кэш шейдера дороги (колеи/грязь)
 var m_trunk: StandardMaterial3D
 var m_leaf: ShaderMaterial
@@ -548,6 +555,20 @@ void fragment() {
 	m_leaf2.set_shader_parameter("albedo", Color(0.34, 0.47, 0.17))
 	m_leaf2.set_shader_parameter("amount", 0.10)
 	m_log = _mat(Color(0.52, 0.38, 0.24))
+	if CC.BLOCKY:
+		# сочная роблокс-палитра: яркие кроны 4 оттенков, тёплый ствол, серые кубы-камни
+		_bm_trunk = CylinderMesh.new()
+		_bm_trunk.top_radius = 0.24
+		_bm_trunk.bottom_radius = 0.32
+		_bm_trunk.height = 3.6
+		_bm_cube = BoxMesh.new()
+		m_trunk_blocky = _mat(Color(0.55, 0.36, 0.20))
+		for c in [Color(0.30, 0.72, 0.30), Color(0.42, 0.78, 0.28), Color(0.26, 0.64, 0.38), Color(0.52, 0.80, 0.30)]:
+			m_crowns.append(_mat(c))
+		for c in [Color(0.36, 0.76, 0.32), Color(0.48, 0.82, 0.30)]:
+			m_bush_v.append(_mat(c))
+		for c in [Color(0.58, 0.58, 0.62), Color(0.48, 0.50, 0.55)]:
+			m_rock_v.append(_mat(c))
 	m_floor = _mat(Color(0.42, 0.30, 0.18))
 	m_rock = _mat(Color(0.5, 0.5, 0.52))
 
@@ -1649,7 +1670,11 @@ func _build_forest() -> void:
 				var bp := "res://art/models/nature/%s.glb" % bn
 				if ResourceLoader.exists(bp):
 					_bush_scenes.append(load(bp))
-		if not _bush_scenes.is_empty():
+		if CC.BLOCKY:
+			var bsc := rng.randf_range(0.8, 1.4)
+			_batch_mesh(_bm_cube, m_bush_v[rng.randi() % m_bush_v.size()],
+				Transform3D(Basis(Vector3.UP, rng.randf() * TAU) * Basis.from_scale(Vector3(bsc, bsc * 0.8, bsc)), Vector3(bx, bsc * 0.34, bz)))
+		elif not _bush_scenes.is_empty():
 			_batch_scene(_bush_scenes[randi() % _bush_scenes.size()], _yrot_scale(Vector3(bx, 0, bz), rng.randf_range(0.0, TAU), rng.randf_range(1.3, 2.2)))
 		else:
 			var bush := MeshInstance3D.new()
@@ -1722,10 +1747,14 @@ func _batch_scene(ps: PackedScene, xform: Transform3D) -> void:
 		inst.free()
 		_mm_templates[ps] = acc
 	for e in _mm_templates[ps]:
-		var mesh: Mesh = e["mesh"]
-		if not _mm_batches.has(mesh):
-			_mm_batches[mesh] = {"xforms": [], "override": e["override"]}
-		_mm_batches[mesh]["xforms"].append(xform * (e["local"] as Transform3D))
+		_batch_mesh(e["mesh"], e["override"], xform * (e["local"] as Transform3D))
+
+func _batch_mesh(mesh: Mesh, mat: Material, xform: Transform3D) -> void:
+	# батч по паре (меш, материал) — блочные детали с разными цветами не смешиваются
+	var key := "%d|%d" % [mesh.get_instance_id(), mat.get_instance_id() if mat != null else 0]
+	if not _mm_batches.has(key):
+		_mm_batches[key] = {"mesh": mesh, "override": mat, "xforms": []}
+	_mm_batches[key]["xforms"].append(xform)
 
 func _yrot_scale(pos: Vector3, rot: float, s: float) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * s), pos)
@@ -1733,12 +1762,12 @@ func _yrot_scale(pos: Vector3, rot: float, s: float) -> Transform3D:
 func _flush_batches() -> void:
 	# создать MultiMeshInstance3D по каждому мешу — весь лес/декор в ~десяток draw-объектов
 	var total := 0
-	for mesh in _mm_batches:
-		var b: Dictionary = _mm_batches[mesh]
+	for key in _mm_batches:
+		var b: Dictionary = _mm_batches[key]
 		var xfs: Array = b["xforms"]
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.mesh = mesh
+		mm.mesh = b["mesh"]
 		mm.instance_count = xfs.size()
 		for i in xfs.size():
 			mm.set_instance_transform(i, xfs[i])
@@ -1771,7 +1800,19 @@ func _tree(pos: Vector3, s: float, leafy: bool = false) -> void:
 	var scenes: Array = _tree_leafy if leafy else _tree_pine
 	if scenes.is_empty():
 		scenes = _load_tree_scenes(leafy)
-	if not scenes.is_empty():
+	if CC.BLOCKY:
+		# роблокс-дерево: цилиндр-ствол + кубы-кроны (ёлка = 3 яруса, лиственное = 2 куба)
+		var base := _yrot_scale(pos, randf() * TAU, s)
+		_batch_mesh(_bm_trunk, m_trunk_blocky, base * Transform3D(Basis.IDENTITY, Vector3(0, 1.8, 0)))
+		var ci := randi() % m_crowns.size()
+		if leafy:
+			_batch_mesh(_bm_cube, m_crowns[ci], base * Transform3D(Basis.from_scale(Vector3(2.9, 2.5, 2.9)), Vector3(0, 4.2, 0)))
+			_batch_mesh(_bm_cube, m_crowns[(ci + 1) % m_crowns.size()], base * Transform3D(Basis.from_scale(Vector3(1.8, 1.4, 1.8)), Vector3(0, 6.0, 0)))
+		else:
+			_batch_mesh(_bm_cube, m_crowns[ci], base * Transform3D(Basis.from_scale(Vector3(3.3, 1.3, 3.3)), Vector3(0, 3.5, 0)))
+			_batch_mesh(_bm_cube, m_crowns[ci], base * Transform3D(Basis.from_scale(Vector3(2.4, 1.2, 2.4)), Vector3(0, 4.6, 0)))
+			_batch_mesh(_bm_cube, m_crowns[ci], base * Transform3D(Basis.from_scale(Vector3(1.5, 1.1, 1.5)), Vector3(0, 5.6, 0)))
+	elif not scenes.is_empty():
 		var ps: PackedScene = scenes[randi() % scenes.size()]
 		_batch_scene(ps, _yrot_scale(pos, randf() * TAU, s * TREE_SCALE))   # визуал в MultiMesh (перф)
 	else:
@@ -1802,7 +1843,10 @@ func _rock(pos: Vector3, s: float) -> void:
 			var p := "res://art/models/nature/%s.glb" % n
 			if ResourceLoader.exists(p):
 				_rock_scenes.append(load(p))
-	if not _rock_scenes.is_empty():
+	if CC.BLOCKY:
+		_batch_mesh(_bm_cube, m_rock_v[randi() % m_rock_v.size()],
+			Transform3D(Basis(Vector3.UP, randf() * TAU) * Basis.from_scale(Vector3(1.5 * s, 1.0 * s, 1.3 * s)), pos + Vector3(0, 0.38 * s, 0)))
+	elif not _rock_scenes.is_empty():
 		_batch_scene(_rock_scenes[randi() % _rock_scenes.size()], _yrot_scale(pos, randf() * TAU, s * 1.4))
 	else:
 		var mesh := MeshInstance3D.new()
@@ -1824,13 +1868,18 @@ func _rock(pos: Vector3, s: float) -> void:
 func _rock_cluster(cx: float, cz: float, rng: RandomNumberGenerator) -> void:
 	# группа валунов: один крупный с коллайдером + мелкие декоративные камни без коллайдера
 	_rock(Vector3(cx, 0, cz), rng.randf_range(1.5, 2.6))
-	if _rock_scenes.is_empty():
+	if _rock_scenes.is_empty() and not CC.BLOCKY:
 		return
 	for j in rng.randi_range(2, 4):
 		var ms := rng.randf_range(0.3, 0.8) * 1.4
 		var a := rng.randf() * TAU
 		var r := rng.randf_range(1.0, 3.2)
-		_batch_scene(_rock_scenes[rng.randi() % _rock_scenes.size()], _yrot_scale(Vector3(cx + cos(a) * r, 0, cz + sin(a) * r), rng.randf() * TAU, ms))
+		var rp := Vector3(cx + cos(a) * r, 0, cz + sin(a) * r)
+		if CC.BLOCKY:
+			_batch_mesh(_bm_cube, m_rock_v[rng.randi() % m_rock_v.size()],
+				Transform3D(Basis(Vector3.UP, rng.randf() * TAU) * Basis.from_scale(Vector3(1.3 * ms, 0.9 * ms, 1.2 * ms)), rp + Vector3(0, 0.34 * ms, 0)))
+		else:
+			_batch_scene(_rock_scenes[rng.randi() % _rock_scenes.size()], _yrot_scale(rp, rng.randf() * TAU, ms))
 
 func _build_water_and_yacht() -> void:
 	var water := MeshInstance3D.new()
@@ -2042,7 +2091,7 @@ func _make_timokha() -> void:
 	# человечек-примитив, СТОИТ НА ЗЕМЛЕ: origin на y=1.0, ступни на 0.
 	timokha = CharacterBody3D.new()
 	timokha.position = Vector3(0, 1.0, -4)
-	timokha_mat = _mat(Color(0.86, 0.25, 0.20))
+	timokha_mat = _mat(CC.BODY_COLOR)
 	var pants := _mat(Color(0.20, 0.18, 0.24))
 	var skin := _mat(Color(0.85, 0.62, 0.46))
 	# тень-кружок под ногами (заземляет модель, помогает заметить угрозу)
@@ -2061,7 +2110,7 @@ func _make_timokha() -> void:
 	timokha.add_child(shadow)
 	var model_path := CC.MODEL_PATH
 	var tex_path := CC.BILLBOARD_TEX
-	if ResourceLoader.exists(model_path):
+	if ResourceLoader.exists(model_path) and not CC.BLOCKY:
 		# реальная 3D-модель со скелетом и анимацией бега
 		var ps: PackedScene = load(model_path)
 		var mdl: Node3D = ps.instantiate()
@@ -2106,15 +2155,7 @@ func _make_timokha() -> void:
 					if tk_anim.has_animation("walk"):
 						tk_clip_walk = "walk"
 		# жуткая холодная подсветка — заметен ночью (когда охотится), днём выключена
-		tk_glow = OmniLight3D.new()
-		tk_glow.position = Vector3(0, 1.45, -0.6)   # спереди-сверху (−Z = look_at к игроку) → мягко освещает всё тело
-		tk_glow.light_color = CC.GLOW_COLOR   # бледно-лунный, нездоровый
-		tk_glow.omni_range = 9.0
-		tk_glow.omni_attenuation = 0.5   # пологое затухание = ровный мягкий свет, без горячего пятна/bloom
-		tk_glow.light_energy = 0.0
-		tk_glow.shadow_enabled = false
-		timokha.add_child(tk_glow)
-		# эмиссия по собственной текстуре — Мишганчик светится в темноте (видимость ночью)
+		# эмиссия по собственной текстуре — персонаж светится в темноте (видимость ночью)
 		tk_mats.clear()
 		for mi in _collect_meshes(mdl):
 			if mi.mesh == null:
@@ -2130,7 +2171,7 @@ func _make_timokha() -> void:
 					dup.emission_energy_multiplier = 0.0            # рулится в _day_night по ночи
 					mi.set_surface_override_material(s, dup)
 					tk_mats.append(dup)
-	elif ResourceLoader.exists(tex_path):
+	elif ResourceLoader.exists(tex_path) and not CC.BLOCKY:
 		# реальная модель-вырез Мишганчика как билборд-спрайт (всегда лицом к камере)
 		var spr := Sprite3D.new()
 		spr.texture = load(tex_path)
@@ -2145,14 +2186,14 @@ func _make_timokha() -> void:
 		tk_sprite = spr
 		timokha.add_child(spr)
 	else:
-		# запасной примитив-человечек (если текстуры нет)
-		for sx in [-0.22, 0.22]:
+		# РОБЛОКС-ФИГУРА: блочное тело + куб-голова с фото-лицом decal (как аватар Roblox)
+		for sx in [-0.24, 0.24]:
 			var hip := Node3D.new()
 			hip.position = Vector3(sx, 0.0, 0)
 			timokha.add_child(hip)
 			var leg := MeshInstance3D.new()
 			var lb := BoxMesh.new()
-			lb.size = Vector3(0.3, 1.0, 0.34)
+			lb.size = Vector3(0.38, 1.0, 0.42)
 			leg.mesh = lb
 			leg.position = Vector3(0, -0.5, 0)
 			leg.material_override = pants
@@ -2160,45 +2201,55 @@ func _make_timokha() -> void:
 			tk_legs.append(hip)
 		var torso := MeshInstance3D.new()
 		var tb := BoxMesh.new()
-		tb.size = Vector3(0.86, 0.95, 0.5)
+		tb.size = Vector3(1.0, 1.0, 0.55)
 		torso.mesh = tb
-		torso.position = Vector3(0, 0.38, 0)
+		torso.position = Vector3(0, 0.5, 0)
 		torso.material_override = timokha_mat
 		timokha.add_child(torso)
-		for sx in [-0.56, 0.56]:
+		for sx in [-0.66, 0.66]:
 			var sh := Node3D.new()
-			sh.position = Vector3(sx, 0.78, 0)
+			sh.position = Vector3(sx, 0.88, 0)
 			timokha.add_child(sh)
 			var arm := MeshInstance3D.new()
 			var ab := BoxMesh.new()
-			ab.size = Vector3(0.2, 0.85, 0.22)
+			ab.size = Vector3(0.3, 0.95, 0.32)
 			arm.mesh = ab
-			arm.position = Vector3(0, -0.42, 0)
-			arm.material_override = timokha_mat
+			arm.position = Vector3(0, -0.44, 0)
+			arm.material_override = skin
 			sh.add_child(arm)
 			tk_arms.append(sh)
 		var head := MeshInstance3D.new()
-		var hs := SphereMesh.new()
-		hs.radius = 0.32
-		hs.height = 0.64
-		head.mesh = hs
-		head.position = Vector3(0, 1.05, 0)
+		var hcube := BoxMesh.new()
+		hcube.size = Vector3(0.68, 0.68, 0.68)
+		head.mesh = hcube
+		head.position = Vector3(0, 1.42, 0)
 		head.material_override = skin
 		timokha.add_child(head)
-		var nose := MeshInstance3D.new()
-		var nb := BoxMesh.new()
-		nb.size = Vector3(0.16, 0.16, 0.2)
-		nose.mesh = nb
-		nose.position = Vector3(0, 1.02, -0.34)
-		nose.material_override = skin
-		timokha.add_child(nose)
-		var hat := MeshInstance3D.new()
-		var hb := BoxMesh.new()
-		hb.size = Vector3(0.72, 0.26, 0.72)
-		hat.mesh = hb
-		hat.position = Vector3(0, 1.38, 0)
-		hat.material_override = _mat(Color(0.45, 0.12, 0.1))
-		timokha.add_child(hat)
+		if ResourceLoader.exists(tex_path):
+			# лицо из фото — decal на передней грани куба (мемность + узнаваемость)
+			# регион лица — через uv1_offset/scale (AtlasTexture в 3D-материалах НЕ работает: регион игнорируется)
+			var fmat := StandardMaterial3D.new()
+			fmat.albedo_texture = load(tex_path)
+			fmat.uv1_offset = Vector3(CC.FACE_REGION.position.x, CC.FACE_REGION.position.y, 0)
+			fmat.uv1_scale = Vector3(CC.FACE_REGION.size.x, CC.FACE_REGION.size.y, 1)
+			fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+			var face := MeshInstance3D.new()
+			var qm := QuadMesh.new()
+			qm.size = Vector2(0.6, 0.6)
+			face.mesh = qm
+			face.position = Vector3(0, 1.42, -0.346)   # чуть перед гранью (фронт фигуры = -Z)
+			face.rotation.y = PI
+			face.material_override = fmat
+			timokha.add_child(face)
+	# ночная подсветка + цветовой телеграф рывка (_tk_signal) — для ЛЮБОГО варианта персонажа
+	tk_glow = OmniLight3D.new()
+	tk_glow.position = Vector3(0, 1.45, -0.6)   # спереди-сверху (−Z = look_at к игроку)
+	tk_glow.light_color = CC.GLOW_COLOR
+	tk_glow.omni_range = 9.0
+	tk_glow.omni_attenuation = 0.5
+	tk_glow.light_energy = 0.0
+	tk_glow.shadow_enabled = false
+	timokha.add_child(tk_glow)
 	var cs := CollisionShape3D.new()
 	var cc := CapsuleShape3D.new()
 	cc.radius = 0.45
@@ -3656,7 +3707,7 @@ func _move_timokha(delta: float) -> void:
 				_tk_signal(Color(1.0, 0.6, 0.15), 1.3)    # ОРАНЖЕВАЯ = готовится (успей отбежать)
 				tk_state = "готовится к рывку..."
 			else:
-				timokha_mat.albedo_color = Color(0.86, 0.25, 0.20)
+				timokha_mat.albedo_color = CC.BODY_COLOR
 				_tk_signal(CC.GLOW_COLOR, -1.0)  # обычный бледно-лунный (энергию ведёт _day_night)
 				tk_state = "ВИДИТ ТЕБЯ!"
 		else:
@@ -3664,7 +3715,7 @@ func _move_timokha(delta: float) -> void:
 			_tele = false
 			_dash = false
 			_cd = 5.0
-			timokha_mat.albedo_color = Color(0.86, 0.25, 0.20)
+			timokha_mat.albedo_color = CC.BODY_COLOR
 			_tk_signal(CC.GLOW_COLOR, -1.0)
 			tk_state = "идёт на тебя..."
 	else:
@@ -3674,7 +3725,7 @@ func _move_timokha(delta: float) -> void:
 		spd = 1.5
 		tk_state = "спит у избы" if wake > 0.0 else "бродит (день)"
 		target = Vector3(3.0, timokha.global_position.y, 6.5)
-		timokha_mat.albedo_color = Color(0.55, 0.45, 0.45)
+		timokha_mat.albedo_color = CC.BODY_COLOR.darkened(0.25)
 
 	var to := target - timokha.global_position
 	to.y = 0.0
