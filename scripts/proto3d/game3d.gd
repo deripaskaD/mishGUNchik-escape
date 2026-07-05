@@ -183,6 +183,10 @@ var _save_day := 0
 var _new_daily := false
 var lowgfx := false   # ручной режим «Графика: Низ» (сохраняется) — форсит мобильные оптимизации
 var noads := false    # IAP «убрать рекламу» (заглушка; сохраняется; за родительским гейтом)
+var flashlight: SpotLight3D      # фонарик на ночь (награда за rewarded-рекламу)
+var flashlight_on := false       # активен до рассвета
+var flash_btn: Button            # контекстная кнопка «Фонарик» при наступлении ночи
+var flash_btn_t := 0.0
 var ads: Node         # каркас монетизации (scripts/proto3d/ads.gd) — реальный SDK подключается там
 var window_mats: Array = []
 var snd_btn: Button
@@ -397,6 +401,14 @@ func _ready() -> void:
 		pitch = 0.7              # дневное небо/облака
 		if cam != null:
 			cam.rotation.x = 0.7
+	if "--shottorch" in args:
+		_shot = true
+		clock = DAY_LEN * 0.72   # ночь
+		wake = 0.0
+		_was_night = true
+		flashlight_on = true     # проверка света фонарика (rewarded-награда)
+		if rain != null:
+			rain.emitting = false
 	if "--shotdusk" in args:
 		_shot = true
 		clock = DAY_LEN * 0.53   # закат — тёплое небо у горизонта
@@ -1977,6 +1989,14 @@ func _make_player() -> void:
 	cam.fov = 75.0
 	cam.position = Vector3(0, 0.7, 0)
 	player.add_child(cam)
+	# фонарик (награда rewarded «flashlight»): тёплый конус света до рассвета
+	flashlight = SpotLight3D.new()
+	flashlight.spot_angle = 32.0
+	flashlight.spot_range = 30.0
+	flashlight.light_color = Color(1.0, 0.95, 0.8)
+	flashlight.light_energy = 0.0
+	flashlight.shadow_enabled = false
+	cam.add_child(flashlight)
 	# падающие листья вокруг игрока (атмосфера, на уровне глаз)
 	if not _autoplay:
 		var leaves := CPUParticles3D.new()
@@ -2590,6 +2610,19 @@ void fragment() {
 	chase_banner.text = "БЕГИ К ЯХТЕ — %s ГОНИТСЯ!" % CC.NAME.to_upper()
 	chase_banner.visible = false
 	layer.add_child(chase_banner)
+	# кнопка «Фонарик (реклама)» — появляется на ~12с при наступлении ночи
+	flash_btn = Button.new()
+	flash_btn.text = "Фонарик (реклама)"
+	flash_btn.size = Vector2(250, 52)
+	flash_btn.position = Vector2(vp.x * 0.5 - 125, vp.y - 170)
+	_style_button(flash_btn, Color(0.82, 0.6, 0.16), 20)
+	flash_btn.visible = false
+	flash_btn.pressed.connect(func():
+		flash_btn.visible = false
+		if ads != null:
+			ads.show_rewarded("flashlight")
+	)
+	layer.add_child(flash_btn)
 	# ── оверлей джампскейра (поверх игрового HUD) ──
 	js_root = Control.new()
 	js_root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -3424,6 +3457,10 @@ func _process(delta: float) -> void:
 	if note_panel != null:
 		note_t = maxf(0.0, note_t - delta)
 		note_panel.modulate.a = clampf(note_t, 0.0, 1.0)   # пергамент плавно гаснет
+	if flash_btn != null and flash_btn.visible:
+		flash_btn_t -= delta
+		if flash_btn_t <= 0.0 or flashlight_on or not _is_night():
+			flash_btn.visible = false
 	# джампскейр: спад показа + кулдаун + редкий ночной «мельк»
 	if js_cd > 0.0:
 		js_cd = maxf(0.0, js_cd - delta)
@@ -3533,6 +3570,9 @@ func _physics_process(delta: float) -> void:
 		_cd = 2.5
 		last_seen = player.global_position
 		_play(snd_stinger)
+		if flash_btn != null and not _autoplay and not flashlight_on:
+			flash_btn.visible = true      # предложить фонарик на эту ночь
+			flash_btn_t = 12.0
 		if ads != null and not _autoplay:
 			ads.show_interstitial("night")
 		if not _autoplay:
@@ -3592,6 +3632,10 @@ func _day_night() -> void:
 	if moon != null:                                   # прохладная лунная подсветка ночью
 		moon.visible = nf > 0.02
 		moon.light_energy = lerpf(0.0, 0.30, nf)
+	if flashlight != null:                             # фонарик-награда: горит ночью, гаснет на рассвете
+		if nf < 0.3:
+			flashlight_on = false
+		flashlight.light_energy = 2.6 if (flashlight_on and nf > 0.3) else 0.0
 	if fireflies != null:                              # светлячки только ночью
 		var fly := nf > 0.3
 		if fireflies.emitting != fly:
@@ -4011,6 +4055,12 @@ func _on_rewarded(tag: String, _ok: bool) -> void:
 	match tag:
 		"revive":
 			_revive()
+		"flashlight":
+			flashlight_on = true
+			if done_label != null:
+				done_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.6))
+				done_label.text = "Фонарик включён — до рассвета!"
+				done_t = 2.2
 		# "hint" / "flashlight" / "skip" — резервные награды (см. scripts/proto3d/ads.gd)
 
 func _revive() -> void:
@@ -4067,7 +4117,7 @@ func _start_final_chase() -> void:
 
 func _hide_gameplay_hud() -> void:
 	# финальный экран (победа/проигрыш) — прячем игровой HUD/контролы, оставляя только итог
-	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_card, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, lives_label, crosshair, tutorial_label, done_label]:
+	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_card, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, lives_label, crosshair, tutorial_label, done_label, flash_btn]:
 		if n != null:
 			n.visible = false
 	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
