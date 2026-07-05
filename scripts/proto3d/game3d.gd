@@ -189,6 +189,7 @@ var flashlight_on := false       # активен до рассвета
 var flash_btn: Button            # контекстная кнопка «Фонарик» при наступлении ночи
 var flash_btn_t := 0.0
 var ads: Node         # каркас монетизации (scripts/proto3d/ads.gd) — реальный SDK подключается там
+var analytics: Node   # каркас телеметрии (scripts/proto3d/analytics.gd) — воронка удержания/рекламы
 var window_mats: Array = []
 var snd_btn: Button
 var gfx_btn: Button
@@ -297,6 +298,11 @@ func _ready() -> void:
 	ads.ads_removed = noads
 	ads.rewarded_done.connect(_on_rewarded)
 	add_child(ads)
+	analytics = preload("res://scripts/proto3d/analytics.gd").new()
+	add_child(analytics)
+	ads.interstitial_shown.connect(func(reason): analytics.log_event("ad_interstitial", {"reason": reason}))
+	if not _autoplay:
+		analytics.log_event("session_start", {"gentle": gentle, "lowgfx": lowgfx, "streak": streak})
 	if lowgfx:
 		_mobile = true   # ручной режим «Графика: Низ» форсит все мобильные оптимизации на любом устройстве
 	if _mobile:
@@ -3060,6 +3066,8 @@ func _build_title() -> void:
 func _start_game() -> void:
 	if title_root != null:
 		title_root.visible = false
+	if analytics != null:
+		analytics.log_event("game_start")
 	paused = false
 	_tut_t = 9.0   # туториал стартует с нажатия «Играть» (не горит под тайтлом)
 	if tutorial_label != null:
@@ -3614,6 +3622,8 @@ func _physics_process(delta: float) -> void:
 		if flash_btn != null and not _autoplay and not flashlight_on:
 			flash_btn.visible = true      # предложить фонарик на эту ночь
 			flash_btn_t = 12.0
+		if analytics != null and not _autoplay:
+			analytics.log_event("night_reached", {"night": nights})
 		if ads != null and not _autoplay:
 			ads.show_interstitial("night")
 		if not _autoplay:
@@ -3954,6 +3964,8 @@ func _update_quests(delta: float) -> void:
 				if q["kind"] == "yacht":
 					won = true
 					_play(snd_win)
+					if analytics != null and not _autoplay:
+						analytics.log_event("game_win", {"nights": nights, "caught": caught, "seconds": int(clock)})
 					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # курсор для кнопки «Играть снова»
 				else:
 					_play(snd_ding)
@@ -3961,6 +3973,8 @@ func _update_quests(delta: float) -> void:
 						catch_flash.color = Color(0.2, 1.0, 0.4, 0.0)
 						flash_v = 0.5
 					_reveal_note()   # дневное дело → раскрыть следующую записку лора
+					if analytics != null and not _autoplay:
+						analytics.log_event("quest_done", {"id": q["id"], "done_count": quests_done, "night": nights})
 					if ads != null and not _autoplay:
 						ads.show_interstitial("quest_done")
 					if done_label != null:
@@ -4061,6 +4075,8 @@ func _check_catch() -> void:
 		if lives > 0:
 			# мягкий проигрыш: быстрый респаун у избы, передышка — петля продолжается (детям не обидно)
 			_soft_respawn()
+			if analytics != null and not _autoplay:
+				analytics.log_event("caught", {"night": nights, "lives_left": lives})
 			if ads != null and not _autoplay:
 				ads.show_interstitial("catch")
 			if done_label != null:
@@ -4091,6 +4107,8 @@ func _revive_via_ad() -> void:
 		_revive()
 
 func _on_rewarded(tag: String, _ok: bool) -> void:
+	if analytics != null:
+		analytics.log_event("ad_rewarded", {"tag": tag, "granted": _ok})
 	if not _ok:
 		return
 	match tag:

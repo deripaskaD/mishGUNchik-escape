@@ -29,12 +29,15 @@ func can_interstitial() -> bool:
 	return (not ads_removed) and _session_t > FIRST_SESSION_GRACE \
 		and (_session_t - _last_inter) > INTER_COOLDOWN
 
+signal interstitial_shown(reason: String)   # для аналитики (game3d слушает и логирует)
+
 func show_interstitial(reason: String) -> void:
 	# ← ТОЧКА ИНТЕГРАЦИИ SDK. Заглушка ничего не показывает (без фейковых экранов у тестеров).
 	if not can_interstitial():
 		return
 	_last_inter = _session_t
 	print("[ads] interstitial (%s) — заглушка; здесь вызов SDK" % reason)
+	interstitial_shown.emit(reason)
 
 func show_rewarded(tag: String) -> void:
 	# ← ТОЧКА ИНТЕГРАЦИИ SDK. Заглушка мгновенно «выдаёт награду» (dev-режим).
