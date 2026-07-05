@@ -184,6 +184,10 @@ var _new_daily := false
 var lowgfx := false   # ручной режим «Графика: Низ» (сохраняется) — форсит мобильные оптимизации
 var noads := false    # IAP «убрать рекламу» (заглушка; сохраняется; за родительским гейтом)
 var gentle := false   # «Мягкий режим» для малышей: слабее/реже джампскейры, тише саспенс (сохраняется)
+# рекорды (retention): копятся между сессиями в сейве
+var wins_total := 0
+var caught_total := 0
+var best_nights := 0
 var flashlight: SpotLight3D      # фонарик на ночь (награда за rewarded-рекламу)
 var flashlight_on := false       # активен до рассвета
 var flash_btn: Button            # контекстная кнопка «Фонарик» при наступлении ночи
@@ -2935,6 +2939,9 @@ func _load_save() -> void:
 	lowgfx = bool(data.get("lowgfx", false))
 	noads = bool(data.get("noads", false))
 	gentle = bool(data.get("gentle", false))
+	wins_total = int(data.get("wins", 0))
+	caught_total = int(data.get("tot_caught", 0))
+	best_nights = int(data.get("best_nights", 0))
 	lore_idx = clampi(int(data.get("lore", 0)), 0, LORE.size())
 	lore_found.clear()
 	for i in lore_idx:
@@ -2953,7 +2960,7 @@ func _save_game() -> void:
 		return   # тест/скриншот-режимы не пишут сейв
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f != null:
-		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle}))
+		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights}))
 		f.close()
 
 func _build_title() -> void:
@@ -3047,6 +3054,16 @@ func _build_title() -> void:
 		st.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
 		st.text = "Серия: %d дн. · бонус +%d жизни сегодня" % [streak, daily_bonus]
 		title_root.add_child(st)
+	if wins_total > 0 or best_nights > 0:
+		var rec := Label.new()
+		rec.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		rec.offset_top = vp.y * 0.42 + 306
+		rec.offset_bottom = vp.y * 0.42 + 330
+		rec.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rec.add_theme_font_size_override("font_size", 15)
+		rec.add_theme_color_override("font_color", Color(0.75, 0.82, 0.9))
+		rec.text = "Рекорд: %d ноч. · Побегов: %d · Поймали: %d раз" % [best_nights, wins_total, caught_total]
+		title_root.add_child(rec)
 	# кросс-промо серии: «Ещё игры» (виден только когда в конфиге задан URL)
 	if CC.MORE_GAMES_URL != "":
 		var bmore := Button.new()
@@ -3964,6 +3981,9 @@ func _update_quests(delta: float) -> void:
 				if q["kind"] == "yacht":
 					won = true
 					_play(snd_win)
+					wins_total += 1
+					best_nights = maxi(best_nights, nights)
+					_save_game()
 					if analytics != null and not _autoplay:
 						analytics.log_event("game_win", {"nights": nights, "caught": caught, "seconds": int(clock)})
 					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # курсор для кнопки «Играть снова»
@@ -4070,6 +4090,9 @@ func _check_catch() -> void:
 			wake = 4.0
 			return
 		lives -= 1
+		caught_total += 1
+		best_nights = maxi(best_nights, nights)
+		_save_game()
 		js_cd = 0.0                       # сбросить кулдаун — поимка всегда даёт джампскейр
 		_jumpscare(0.6, 1.0, null)        # ТРИГГЕР: поимка — лицо на весь экран (snd_caught уже сыгран выше, не перезапускать)
 		if lives > 0:
