@@ -498,7 +498,31 @@ func _add_light(pos: Vector3, color: Color, energy: float, rng: float) -> OmniLi
 func _build_materials() -> void:
 	var gtex: Variant = load("res://art/textures/grass.png") if ResourceLoader.exists("res://art/textures/grass.png") else null
 	var dtex: Variant = load("res://art/textures/dirt.png") if ResourceLoader.exists("res://art/textures/dirt.png") else null
-	if gtex != null and dtex != null:
+	if CC.BLOCKY:
+		# роблокс-земля: ярко-зелёная, мягкие пятна двух оттенков (без текстур — чистый flat-стиль)
+		var bgsh := Shader.new()
+		bgsh.code = """shader_type spatial;
+uniform vec3 g1 = vec3(0.33, 0.65, 0.28);
+uniform vec3 g2 = vec3(0.45, 0.79, 0.33);
+uniform float patch = 46.0;
+float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vns(vec2 p){
+	vec2 i = floor(p); vec2 f = fract(p);
+	float a = hsh(i); float b = hsh(i + vec2(1.0, 0.0));
+	float c = hsh(i + vec2(0.0, 1.0)); float d = hsh(i + vec2(1.0, 1.0));
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+void fragment(){
+	float m = vns(UV * patch) * 0.62 + vns(UV * patch * 3.1 + vec2(11.0, 5.0)) * 0.38;
+	ALBEDO = mix(g1, g2, smoothstep(0.35, 0.75, m));
+	ROUGHNESS = 1.0;
+}
+"""
+		var bgm := ShaderMaterial.new()
+		bgm.shader = bgsh
+		m_ground = bgm
+	elif gtex != null and dtex != null:
 		# земля = шейдер: трава + проплешины грязи по шуму + крупная цветовая вариация (не «одна плоская текстура»)
 		var gsh := Shader.new()
 		gsh.code = """shader_type spatial;
@@ -1551,6 +1575,7 @@ func _path(a: Vector3, b: Vector3) -> void:
 			_path_shader.code = """shader_type spatial;
 uniform sampler2D dirt : source_color, repeat_enable, filter_linear_mipmap;
 uniform float len = 10.0;
+uniform float bright = 1.0;
 float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vns(vec2 p){
 	vec2 i = floor(p); vec2 f = fract(p);
@@ -1566,7 +1591,7 @@ void fragment(){
 	c *= mix(0.60, 1.06, ruts);
 	float wheel = smoothstep(0.07, 0.0, abs(UV.x - 0.32)) + smoothstep(0.07, 0.0, abs(UV.x - 0.68));
 	c *= mix(1.0, 0.68, clamp(wheel, 0.0, 1.0) * 0.7);        // две тёмные колеи вдоль
-	ALBEDO = c;
+	ALBEDO = c * bright;
 	ROUGHNESS = 1.0;
 }
 """
@@ -1574,6 +1599,8 @@ void fragment(){
 		psh.shader = _path_shader
 		psh.set_shader_parameter("dirt", dtex)
 		psh.set_shader_parameter("len", length)
+		if CC.BLOCKY:
+			psh.set_shader_parameter("bright", 1.5)   # светлые роблокс-дорожки
 		seg.material_override = psh
 	else:
 		var pmat := _mat(Color(0.30, 0.24, 0.16))
@@ -1609,7 +1636,7 @@ func _on_path(x: float, z: float) -> bool:
 func _build_forest() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260627
-	var n := 60 if _autoplay else (int(TREES / 5) if _mobile else TREES)   # телефон: меньше деревьев (лаги у тестеров) — 480 вместо 800
+	var n := 60 if _autoplay else (int(TREES / 3) if _mobile else TREES)   # блочный MultiMesh-лес дешёвый → мобиле снова густой (800)
 	var placed := 0
 	var attempts := 0
 	while placed < n and attempts < n * 4:
