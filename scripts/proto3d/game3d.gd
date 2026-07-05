@@ -104,6 +104,11 @@ var _autoplay := false
 const _AP_ORDER := ["wood1", "wood2", "herb1", "herb2", "cucumber", "water", "berries", "mushroom", "fish", "chickens", "fence", "potato", "apples", "banya", "bones", "brew", "yacht"]
 var _ap_log := {}
 var _ap_frames := 0
+var _ap_max := 12000   # кэп кадров автоплея; --aplong → 60000 (полное прохождение до победы)
+var _ap_stuck := 0.0   # бот: детект застревания между коллайдерами (как у Мишганчика)
+var _ap_detour := Vector3.ZERO
+var _ap_detour_t := 0.0
+var _ap_lastpos := Vector3.ZERO
 
 # тач-управление (мобайл)
 var _touch_flag := false
@@ -296,6 +301,8 @@ func _ready() -> void:
 		wake = 0.0               # без грейса — ночь-спавн срабатывает сразу
 	if _autoplay:
 		print("[autoplay] start")
+		if "--aplong" in args:
+			_ap_max = 60000   # длинный прогон: проверить ПОЛНУЮ петлю до won=true
 	if not _autoplay:
 		_load_save()   # стрик/бонус-жизни/дневник/lowgfx до постройки HUD
 	ads = preload("res://scripts/proto3d/ads.gd").new()
@@ -3676,7 +3683,7 @@ func _physics_process(delta: float) -> void:
 		_autoplay_log()
 		if _ap_frames % 600 == 0:
 			_ap_summary()   # периодически пишем прогресс в файл (переживёт kill)
-		if won or _ap_frames > 12000:
+		if won or _ap_frames > _ap_max:
 			_ap_summary()
 			get_tree().quit()
 
@@ -4447,16 +4454,65 @@ func _autoplay_move(delta: float) -> void:
 		for q in quests:
 			if q["id"] == qid:
 				tp = q["pos"]
+	# ── маршрутизация вокруг ИЗБЫ (стены-коллайдеры!): прямая через (0,0) клинила бота внутри навсегда ──
+	var pp := Vector2(player.global_position.x, player.global_position.z)
+	var tt := Vector2(tp.x, tp.z)
+	var p_in := absf(pp.x) < 7.0 and absf(pp.y) < 7.0
+	var t_in := absf(tt.x) < 7.0 and absf(tt.y) < 7.0
+	var wp_mode := false   # промежуточный вейпоинт → малый стоп-радиус (2.2м замораживал бота у двери)
+	if t_in and not p_in:
+		# цель внутри (котёл): выровняться перед дверью (+Z), затем сквозь дверной проём по оси
+		wp_mode = true
+		if absf(pp.x) > 1.0 or pp.y > 10.5:
+			tp = Vector3(0, 0, 9.5)
+		else:
+			tp = Vector3(0, 0, 1.5)
+	elif p_in and not t_in:
+		# выйти: выровняться на ось двери изнутри, затем наружу
+		wp_mode = true
+		if absf(pp.x) > 1.0:
+			tp = Vector3(0, 0, 2.0)
+		else:
+			tp = Vector3(0, 0, 9.5)
+	elif not p_in and not t_in:
+		# транзит: если отрезок проходит близко к избе — обойти сбоку
+		var seg := tt - pp
+		var L2 := seg.length_squared()
+		if L2 > 1.0:
+			var tcl := clampf(-(pp.dot(seg)) / L2, 0.0, 1.0)
+			var closest := pp + seg * tcl
+			if closest.length() < 9.0:
+				var out_dir := closest.normalized() if closest.length() > 0.5 else Vector2(seg.y, -seg.x).normalized()
+				var wp := out_dir * 13.0
+				tp = Vector3(wp.x, 0, wp.y)
 	var to := tp - player.global_position
 	to.y = 0.0
 	var vy := player.velocity.y - GRAVITY * delta
 	if player.is_on_floor() and vy < 0.0:
 		vy = -1.0
 	var move := Vector3.ZERO
-	if to.length() > 2.2:
+	if to.length() > (0.6 if wp_mode else 2.2):
 		move = to.normalized()
+	# обход застревания (V-карман между деревьями/камнями клинил бота навсегда — грибы никогда не достигались)
+	if _ap_detour_t > 0.0 and move.length() > 0.1:
+		_ap_detour_t -= delta
+		move = (move * 0.3 + _ap_detour * 0.95).normalized()
 	player.velocity = Vector3(move.x * SPRINT, vy, move.z * SPRINT)   # бот «спринтует», как человек ночью
 	player.move_and_slide()
+	if move.length() > 0.1:
+		var ap_moved := Vector2(player.global_position.x - _ap_lastpos.x, player.global_position.z - _ap_lastpos.z).length()
+		if ap_moved < SPRINT * delta * 0.35:
+			_ap_stuck += delta
+		else:
+			_ap_stuck = 0.0
+		if _ap_stuck > 0.4 and _ap_detour_t <= 0.0:
+			var perp := Vector3(-move.z, 0.0, move.x)
+			if randf() < 0.5:
+				perp = -perp
+			_ap_detour = perp
+			_ap_detour_t = 0.8
+			_ap_stuck = 0.0
+	_ap_lastpos = player.global_position
 
 func _autoplay_log() -> void:
 	for q in quests:
