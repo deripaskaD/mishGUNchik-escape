@@ -234,6 +234,7 @@ var m_leaf2: ShaderMaterial
 var m_log: StandardMaterial3D
 var m_floor: StandardMaterial3D
 var m_rock: StandardMaterial3D
+var m_roof: StandardMaterial3D
 
 var pitch := 0.0
 var stun := 0.0
@@ -554,7 +555,8 @@ void fragment() {
 	m_leaf2.shader = wind_shader
 	m_leaf2.set_shader_parameter("albedo", Color(0.34, 0.47, 0.17))
 	m_leaf2.set_shader_parameter("amount", 0.10)
-	m_log = _mat(Color(0.52, 0.38, 0.24))
+	m_log = _mat(Color(0.80, 0.58, 0.34) if CC.BLOCKY else Color(0.52, 0.38, 0.24))   # BLOCKY: светлое «роблокс»-дерево
+	m_roof = _mat(Color(0.82, 0.26, 0.20) if CC.BLOCKY else Color(0.40, 0.22, 0.16))  # сочно-красная крыша
 	if CC.BLOCKY:
 		# сочная роблокс-палитра: яркие кроны 4 оттенков, тёплый ствол, серые кубы-камни
 		_bm_trunk = CylinderMesh.new()
@@ -569,7 +571,7 @@ void fragment() {
 			m_bush_v.append(_mat(c))
 		for c in [Color(0.58, 0.58, 0.62), Color(0.48, 0.50, 0.55)]:
 			m_rock_v.append(_mat(c))
-	m_floor = _mat(Color(0.42, 0.30, 0.18))
+	m_floor = _mat(Color(0.62, 0.44, 0.26) if CC.BLOCKY else Color(0.42, 0.30, 0.18))
 	m_rock = _mat(Color(0.5, 0.5, 0.52))
 
 const SKY_SHADER := "
@@ -805,7 +807,7 @@ func _build_cabin() -> void:
 	var rb := BoxMesh.new()
 	rb.size = Vector3(half * 2 + 0.6, 0.25, half + 0.8)
 	roofL.mesh = rb
-	roofL.material_override = _mat(Color(0.40, 0.22, 0.16))
+	roofL.material_override = m_roof
 	roofL.position = Vector3(0, H + 1.0, -half * 0.5)
 	roofL.rotation_degrees = Vector3(-28, 0, 0)
 	add_child(roofL)
@@ -1906,6 +1908,8 @@ void fragment() {
 """
 	var wm := ShaderMaterial.new()
 	wm.shader = wsh
+	if CC.BLOCKY:
+		wm.set_shader_parameter("col", Color(0.20, 0.55, 0.88, 0.9))   # сочная роблокс-вода
 	water.material_override = wm
 	add_child(water)
 	# причал + яхта (у дальнего края воды)
@@ -4413,7 +4417,7 @@ func _porch(half: float, h: float) -> void:
 	var rb := BoxMesh.new()
 	rb.size = Vector3(3.6, 0.2, 2.8)
 	roof.mesh = rb
-	roof.material_override = _mat(Color(0.40, 0.22, 0.16))
+	roof.material_override = m_roof
 	roof.position = Vector3(0, 2.5, z + 0.3)
 	roof.rotation_degrees = Vector3(-18, 0, 0)
 	add_child(roof)
