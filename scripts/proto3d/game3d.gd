@@ -183,6 +183,7 @@ var _save_day := 0
 var _new_daily := false
 var lowgfx := false   # ручной режим «Графика: Низ» (сохраняется) — форсит мобильные оптимизации
 var noads := false    # IAP «убрать рекламу» (заглушка; сохраняется; за родительским гейтом)
+var gentle := false   # «Мягкий режим» для малышей: слабее/реже джампскейры, тише саспенс (сохраняется)
 var flashlight: SpotLight3D      # фонарик на ночь (награда за rewarded-рекламу)
 var flashlight_on := false       # активен до рассвета
 var flash_btn: Button            # контекстная кнопка «Фонарик» при наступлении ночи
@@ -2926,6 +2927,7 @@ func _load_save() -> void:
 	_save_day = int(data.get("day", 0))
 	lowgfx = bool(data.get("lowgfx", false))
 	noads = bool(data.get("noads", false))
+	gentle = bool(data.get("gentle", false))
 	lore_idx = clampi(int(data.get("lore", 0)), 0, LORE.size())
 	lore_found.clear()
 	for i in lore_idx:
@@ -2944,7 +2946,7 @@ func _save_game() -> void:
 		return   # тест/скриншот-режимы не пишут сейв
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f != null:
-		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads}))
+		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle}))
 		f.close()
 
 func _build_title() -> void:
@@ -3010,11 +3012,22 @@ func _build_title() -> void:
 	_style_button(bjournal, Color(0.45, 0.36, 0.62))
 	bjournal.pressed.connect(_toggle_journal)
 	title_root.add_child(bjournal)
+	var bgentle := Button.new()
+	bgentle.text = "Страх: Мягкий" if gentle else "Страх: Жуткий"
+	bgentle.size = Vector2(135, 50)
+	bgentle.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 218)
+	_style_button(bgentle, Color(0.5, 0.38, 0.55), 17)
+	bgentle.pressed.connect(func():
+		gentle = not gentle
+		_save_game()
+		bgentle.text = "Страх: Мягкий" if gentle else "Страх: Жуткий"
+	)
+	title_root.add_child(bgentle)
 	var bnoads := Button.new()
-	bnoads.text = "Реклама отключена" if noads else "Убрать рекламу"
-	bnoads.size = Vector2(280, 50)
-	bnoads.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 218)
-	_style_button(bnoads, Color(0.55, 0.44, 0.2), 20)
+	bnoads.text = "Без рекламы" if noads else "Убрать рекламу"
+	bnoads.size = Vector2(135, 50)
+	bnoads.position = Vector2(vp.x * 0.5 + 5, vp.y * 0.42 + 218)
+	_style_button(bnoads, Color(0.55, 0.44, 0.2), 17)
 	bnoads.pressed.connect(_noads_pressed.bind(bnoads))
 	title_root.add_child(bnoads)
 	if streak > 0:
@@ -3071,7 +3084,7 @@ func _noads_pressed(btn: Button) -> void:
 		noads = true
 		ads.ads_removed = true
 		_save_game()
-		btn.text = "Реклама отключена"
+		btn.text = "Без рекламы"
 	)
 
 func _parental_gate(on_ok: Callable) -> void:
@@ -3496,7 +3509,7 @@ func _process(delta: float) -> void:
 		js_root.modulate.a = (js_t / maxf(js_dur, 0.01)) * js_peak
 		if js_t <= 0.0:
 			js_root.visible = false
-	if not _autoplay and not won and not lost and not paused and _is_night():
+	if not _autoplay and not won and not lost and not paused and _is_night() and not gentle:
 		_js_glimpse_t -= delta
 		if _js_glimpse_t <= 0.0:
 			_js_glimpse_t = randf_range(30.0, 60.0)
@@ -4024,7 +4037,7 @@ func _check_catch() -> void:
 	# ТРИГГЕР: близкий рывок — Мишганчик почти достал → джампскейр (перезаряжается, когда он далеко)
 	if dist > 22.0:
 		_js_prox_armed = true
-	elif dist < 10.0 and dist >= CATCH_DIST and _js_prox_armed and not _autoplay:
+	elif dist < 10.0 and dist >= CATCH_DIST and _js_prox_armed and not _autoplay and not gentle:
 		_js_prox_armed = false
 		_jumpscare(0.5, 1.0, snd_stinger)
 	if dist < CATCH_DIST:
@@ -4114,6 +4127,9 @@ func _jumpscare(dur: float, peak: float, snd: AudioStreamPlayer) -> void:
 	# резкое появление Мишганчика на весь экран + звук + тряска
 	if js_root == null or js_cd > 0.0 or won or lost or paused:
 		return
+	if gentle:
+		dur *= 0.7
+		peak *= 0.5   # мягкий режим: короче и полупрозрачно
 	js_dur = dur
 	js_t = dur
 	js_peak = peak
@@ -4123,8 +4139,8 @@ func _jumpscare(dur: float, peak: float, snd: AudioStreamPlayer) -> void:
 	js_root.modulate.a = peak
 	if snd != null:
 		_play(snd)
-	if snd_boom != null and peak >= 0.7:
-		_play(snd_boom)   # мемный «бум» на сильных джампскейрах
+	if snd_boom != null and peak >= 0.7 and not gentle:
+		_play(snd_boom)   # мемный «бум» на сильных джампскейрах (в мягком режиме без него)
 
 func _start_final_chase() -> void:
 	# КОРОННАЯ СЦЕНА: все дела готовы → Мишганчик возникает позади и гонит к яхте
@@ -4370,6 +4386,8 @@ func _dread_tick() -> void:
 	var tension := prox * 0.65 + prog * 0.45
 	if not (_is_night() and wake <= 0.0):
 		tension *= 0.25                                                 # днём почти нет
+	if gentle:
+		tension *= 0.5                                                  # мягкий режим — тише саспенс
 	snd_dread.volume_db = lerpf(-55.0, -11.0, clampf(tension, 0.0, 1.0))
 
 func _autoplay_move(delta: float) -> void:
