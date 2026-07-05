@@ -997,7 +997,8 @@ func _camp_props() -> void:
 		add_child(t)
 
 func _build_structures() -> void:
-	var cols := [_mat(Color(0.50, 0.37, 0.24)), _mat(Color(0.46, 0.40, 0.30)), _mat(Color(0.42, 0.34, 0.26)), _mat(Color(0.48, 0.42, 0.32))]
+	var cols := [_mat(Color(0.94, 0.88, 0.72)), _mat(Color(0.86, 0.90, 0.78)), _mat(Color(0.92, 0.82, 0.72)), _mat(Color(0.80, 0.88, 0.92))] if CC.BLOCKY \
+		else [_mat(Color(0.50, 0.37, 0.24)), _mat(Color(0.46, 0.40, 0.30)), _mat(Color(0.42, 0.34, 0.26)), _mat(Color(0.48, 0.42, 0.32))]
 	var i := 0
 	for h in HUTS:
 		_ground_shadow(h, 4.3)
@@ -1540,7 +1541,7 @@ func _hut(pos: Vector3, w: float, d: float, h: float, col: StandardMaterial3D) -
 	var rb := BoxMesh.new()
 	rb.size = Vector3(w + 0.5, 0.25, d * 0.62)
 	rl.mesh = rb
-	rl.material_override = _mat(Color(0.38, 0.22, 0.16))
+	rl.material_override = m_roof if CC.BLOCKY else _mat(Color(0.38, 0.22, 0.16))
 	rl.position = pos + Vector3(0, h + 0.7, -d * 0.25)
 	rl.rotation_degrees = Vector3(-26, 0, 0)
 	add_child(rl)
