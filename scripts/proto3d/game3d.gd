@@ -143,9 +143,6 @@ var hb_wood: Label
 var hb_herbs: Label
 var done_label: Label
 var done_t := 0.0
-var qbar_fill: ColorRect
-var qbar_label: Label
-var qbar_bg: ColorRect
 var quest_card: Panel   # фон-карточка цели (фокус внимания)
 var compass_needle: Node2D   # вращающаяся стрелка-компас в карточке (плавно, не по четвертям)
 var touch_root: Control   # контейнер тач-контролов (джойстик+кнопки) — прячем на финале
@@ -386,8 +383,20 @@ func _ready() -> void:
 		clock = 137.0   # 2:17 для проверки статистики на экране победы
 	if "--shotcabin" in args:
 		_shot = true
-		player.global_position = Vector3(11.5, 1.7, 11.5)
-		player.rotate_y(PI * 0.25)   # взгляд на угол избы (проверка кит-сборки)
+		var ci := args.find("--shotcabin")
+		var cangle := int(args[ci + 1]) if ci + 1 < args.size() and args[ci + 1].is_valid_int() else 0
+		match cangle:
+			0:
+				player.global_position = Vector3(11.5, 1.7, 11.5)
+				player.rotate_y(PI * 0.25)     # фронт-угол
+			1:
+				player.global_position = Vector3(0.0, 2.0, -13.0)
+				player.rotate_y(PI)            # зад
+			2:
+				player.global_position = Vector3(-13.0, 2.0, 0.0)
+				player.rotate_y(-PI * 0.5)     # бок -X
+			3:
+				player.global_position = Vector3(0.0, 1.7, 12.0)   # фронт в упор
 	if "--shotwell" in args:
 		_shot = true
 		player.global_position = Vector3(-170, 1.0, -39)   # смотрит на колодец у квеста «вода»
@@ -575,8 +584,8 @@ func _build_materials() -> void:
 		# роблокс-земля: ярко-зелёная, мягкие пятна двух оттенков (без текстур — чистый flat-стиль)
 		var bgsh := Shader.new()
 		bgsh.code = """shader_type spatial;
-uniform vec3 g1 = vec3(0.36, 0.68, 0.31);
-uniform vec3 g2 = vec3(0.43, 0.76, 0.34);
+uniform vec3 g1 = vec3(0.28, 0.53, 0.22);
+uniform vec3 g2 = vec3(0.36, 0.63, 0.27);
 uniform float patch = 46.0;
 float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vns(vec2 p){
@@ -677,10 +686,10 @@ void fragment() {
 		_bm_trunk.bottom_radius = 0.32
 		_bm_trunk.height = 3.6
 		_bm_cube = BoxMesh.new()
-		m_trunk_blocky = _mat(Color(0.55, 0.36, 0.20))
-		for c in [Color(0.30, 0.72, 0.30), Color(0.42, 0.78, 0.28), Color(0.26, 0.64, 0.38), Color(0.52, 0.80, 0.30)]:
-			m_crowns.append(_mat(c))
-		for c in [Color(0.36, 0.76, 0.32), Color(0.48, 0.82, 0.30)]:
+		m_trunk_blocky = _mat(Color(0.44, 0.29, 0.17))
+		for c in [Color(0.20, 0.52, 0.22), Color(0.28, 0.61, 0.24), Color(0.15, 0.45, 0.23), Color(0.34, 0.66, 0.26)]:
+			m_crowns.append(_mat(c))   # лесная гамма «99 ночей»: глубокая зелень 4 оттенков
+		for c in [Color(0.24, 0.56, 0.26), Color(0.32, 0.64, 0.26)]:
 			m_bush_v.append(_mat(c))
 		for c in [Color(0.58, 0.58, 0.62), Color(0.48, 0.50, 0.55)]:
 			m_rock_v.append(_mat(c))
@@ -792,7 +801,7 @@ func _build_environment() -> void:
 	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45, -40, 0)
 	sun.light_energy = 1.2
-	sun.light_color = Color(1.0, 0.94, 0.83)   # тёплый солнечный свет (не белый «прожектор»)
+	sun.light_color = Color(1.0, 0.92, 0.76)   # тёплое золотое солнце (лес «99 ночей»)
 	sun.shadow_enabled = not _mobile   # на телефоне тени выключены (тяжело)
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL   # 1 сплит: нет мерцания на границах сплитов
 	sun.directional_shadow_max_distance = 45.0   # короче дистанция = плотнее тексели → нет дрожи вблизи
@@ -835,7 +844,7 @@ func _build_environment() -> void:
 	env.adjustment_enabled = true
 	env.adjustment_brightness = 1.0
 	env.adjustment_contrast = 1.18   # больше контраста — не плоско
-	env.adjustment_saturation = 1.12   # сочно, но не кислотно (было 1.22)
+	env.adjustment_saturation = 1.18   # сочный лес «99 ночей» (дымка day убавлена — цвет держит глубину)
 	# мягкое свечение ярких/эмиссивных поверхностей (огонь/окна/луна/лампа)
 	env.glow_enabled = not _mobile   # glow выключен на телефоне (перф)
 	env.glow_intensity = 0.45
@@ -920,8 +929,8 @@ func _kit_house(pos: Vector3, variant: int) -> void:
 	var sides := [
 		[Vector3(1, 0, 0), 0.0],
 		[Vector3(-1, 0, 0), PI],
-		[Vector3(0, 0, 1), PI * 0.5],
-		[Vector3(0, 0, -1), -PI * 0.5],
+		[Vector3(0, 0, 1), -PI * 0.5],
+		[Vector3(0, 0, -1), PI * 0.5],
 	]
 	for si in sides.size():
 		var axis: Vector3 = sides[si][0]
@@ -933,10 +942,12 @@ func _kit_house(pos: Vector3, variant: int) -> void:
 				var nm := wall_n
 				if si == 2 and lvl == 0 and (i == 1 or i == 2):
 					nm = door_n                            # фронт: широкая двойная дверь по центру
-				elif lvl == 0 and (i == 0 or i == 3):
-					nm = win_n                             # окна по углам низа
-				elif lvl == 1 and (i == 1 or i == 2):
-					nm = glass_n                           # верхний пояс — окошки
+				elif si == 2 and lvl == 0 and (i == 0 or i == 3):
+					nm = win_n                             # фронт: окна по бокам двери
+				elif si == 2 and lvl == 1 and (i == 1 or i == 2):
+					nm = glass_n                           # стекло над дверью
+				elif si != 2 and lvl == 0 and i == 1:
+					nm = win_n                             # бока/зад: одно окно
 				# origin модуля: стена лежит на +X грани (смещение 0.45 юнита) → компенсируем
 				var origin := pos + axis * (3.0 - 0.45 * SC) + lat * t + Vector3(0, lvl * SC, 0)
 				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin), m_plaster if nm == "wall" else null)
@@ -1012,7 +1023,7 @@ func _build_cabin() -> void:
 	_wall_col(Vector3((door * 0.5 + seg * 0.5), H * 0.5, half), Vector3(seg, H, 0.3))
 	# СТЕНЫ из Fantasy Town Kit: 6×6 тайлов (SC=1.5), 2 пояса, дверь-2 тайла по центру фронта
 	var SC := 1.5
-	var csides := [[Vector3(1, 0, 0), 0.0], [Vector3(-1, 0, 0), PI], [Vector3(0, 0, 1), PI * 0.5], [Vector3(0, 0, -1), -PI * 0.5]]
+	var csides := [[Vector3(1, 0, 0), 0.0], [Vector3(-1, 0, 0), PI], [Vector3(0, 0, 1), -PI * 0.5], [Vector3(0, 0, -1), PI * 0.5]]
 	for si in csides.size():
 		var axis: Vector3 = csides[si][0]
 		var rot: float = csides[si][1]
@@ -1022,11 +1033,15 @@ func _build_cabin() -> void:
 			for lvl in 2:
 				var nm := "wall-wood"
 				if si == 2 and lvl == 0 and (i == 2 or i == 3):
-					nm = "wall-wood-doorway-square"
-				elif lvl == 0 and (i == 0 or i == 5):
-					nm = "wall-wood-window-shutters"
-				elif lvl == 1 and (i == 2 or i == 3):
-					nm = "wall-wood-window-glass"
+					nm = "wall-wood-doorway-square"          # двойная дверь по центру фронта
+				elif si == 2 and lvl == 0 and (i == 1 or i == 4):
+					nm = "wall-wood-window-shutters"          # окна примыкают к двери
+				elif si == 2 and lvl == 1 and (i == 2 or i == 3):
+					nm = "wall-wood-window-glass"             # стекло над дверью
+				elif si < 2 and lvl == 0 and (i == 2 or i == 3):
+					nm = "wall-wood-window-shutters"          # бока: пара окон по центру
+				elif si == 3 and lvl == 0 and (i == 1 or i == 4):
+					nm = "wall-wood-window-shutters"          # зад: два окна симметрично
 				var origin := Vector3(0, 0, 0) + axis * (half - 0.45 * SC) + lat * t + Vector3(0, lvl * SC, 0)
 				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin))
 	# КРЫША: один модуль roof-gable на всю избу (конёк вдоль X), фронтоны-призмы по ±X
@@ -1531,7 +1546,7 @@ func _windmill(pos: Vector3) -> void:
 	# каменная башня из кита: 3×3 тайла (4.5 м), 4 пояса (6 м), пирамидальная крыша, ротор из кита
 	var SC := 1.5
 	var half := 2.25
-	var sides := [[Vector3(1, 0, 0), 0.0], [Vector3(-1, 0, 0), PI], [Vector3(0, 0, 1), PI * 0.5], [Vector3(0, 0, -1), -PI * 0.5]]
+	var sides := [[Vector3(1, 0, 0), 0.0], [Vector3(-1, 0, 0), PI], [Vector3(0, 0, 1), -PI * 0.5], [Vector3(0, 0, -1), PI * 0.5]]
 	for si in sides.size():
 		var axis: Vector3 = sides[si][0]
 		var rot: float = sides[si][1]
@@ -2883,33 +2898,10 @@ void fragment() {
 	note_label.add_theme_color_override("font_color", Color(0.20, 0.13, 0.05))
 	note_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	note_panel.add_child(note_label)
-	# прогресс-бар квестов сверху по центру
-	var bw := 340.0
-	var qbg := ColorRect.new()
-	qbg.color = Color(0, 0, 0, 0.45)
-	qbg.position = Vector2(vp.x * 0.5 - bw * 0.5, 10)
-	qbg.size = Vector2(bw, 24)
-	layer.add_child(qbg)
-	qbar_bg = qbg
-	qbar_fill = ColorRect.new()
-	qbar_fill.color = Color(0.3, 0.8, 0.4, 0.85)
-	qbar_fill.position = Vector2(vp.x * 0.5 - bw * 0.5, 10)
-	qbar_fill.size = Vector2(0, 24)
-	layer.add_child(qbar_fill)
-	qbar_label = Label.new()
-	qbar_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	qbar_label.offset_top = 11
-	qbar_label.offset_bottom = 33
-	qbar_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	qbar_label.add_theme_font_size_override("font_size", 16)
-	qbar_label.add_theme_color_override("font_color", Color(1, 1, 1))
-	qbar_label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	qbar_label.add_theme_constant_override("outline_size", 4)
-	layer.add_child(qbar_label)
-	# счётчик поимок под прогресс-баром
+	# (верхняя полоска прогресса удалена — её дублирует кольцо у прицела)
 	catch_label = Label.new()
 	catch_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	catch_label.offset_top = 38
+	catch_label.offset_top = 12
 	catch_label.offset_bottom = 58
 	catch_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	catch_label.add_theme_font_size_override("font_size", 15)
@@ -4344,9 +4336,9 @@ func _day_night() -> void:
 	sun.light_energy = lerpf(0.85, 0.08, nf)   # было 1.2 — пересвет (белые деревья); мягче
 	sun.shadow_enabled = (not _mobile) and (nf < 0.5)   # на телефоне тени выкл; ночью солнце за горизонтом → тоже выкл
 	env.ambient_light_energy = lerpf(0.28, 0.10, nf)   # ниже заливающий свет → объём, не «прожектор»
-	env.fog_density = lerpf(0.011, 0.042, nf) + sin(clock * 0.15) * 0.0025   # день: меньше белёсой дымки
+	env.fog_density = lerpf(0.0055, 0.042, nf) + sin(clock * 0.15) * 0.0022   # день: дымка едва заметна (лес читается цветом вглубь)
 	env.fog_height_density = lerpf(0.0, 0.07, nf)   # ночью — стелющийся туман у земли (хоррор)
-	env.fog_light_color = Color(0.60, 0.80, 1.0).lerp(Color(0.18, 0.21, 0.30), nf)   # день: голубоватая дымка (не серая); ночь: тёмно-синяя
+	env.fog_light_color = Color(0.62, 0.78, 0.72).lerp(Color(0.16, 0.20, 0.28), nf)   # день: зеленоватая лесная дымка; ночь: тёмно-синяя
 	env.tonemap_exposure = lerpf(0.85, 0.78, nf)   # было 1.06 — выжигало в белое; теперь не пересвечено
 	if moon != null:                                   # прохладная лунная подсветка ночью
 		moon.visible = nf > 0.02
@@ -4870,7 +4862,7 @@ func _start_final_chase() -> void:
 
 func _hide_gameplay_hud() -> void:
 	# финальный экран (победа/проигрыш) — прячем игровой HUD/контролы, оставляя только итог
-	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_card, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, lives_label, crosshair, tutorial_label, done_label, flash_btn]:
+	for n in [hud, radar, touch_root, pause_btn, quest_card, quest_panel, quest_prompt, qp_bg, qp_fill, catch_label, lives_label, crosshair, tutorial_label, done_label, flash_btn]:
 		if n != null:
 			n.visible = false
 	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
@@ -4880,7 +4872,7 @@ func _hide_gameplay_hud() -> void:
 
 func _show_gameplay_hud() -> void:
 	# вернуть игровой HUD (после воскрешения)
-	for n in [hud, radar, touch_root, pause_btn, qbar_fill, qbar_label, qbar_bg, quest_card, quest_panel, crosshair, lives_label]:
+	for n in [hud, radar, touch_root, pause_btn, quest_card, quest_panel, crosshair, lives_label]:
 		if n != null:
 			n.visible = true
 	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
@@ -4917,9 +4909,6 @@ func _refresh_hud() -> void:
 		hb_wood.text = str(wood)
 	if hb_herbs != null:
 		hb_herbs.text = str(herbs)
-	if qbar_fill != null:
-		qbar_fill.size.x = 340.0 * (float(quests_done) / float(max(1, quests.size())))
-		qbar_label.text = "%d / %d дел" % [quests_done, quests.size()]
 	if catch_label != null:
 		catch_label.text = "Поймали: %d" % caught
 		catch_label.visible = caught > 0
