@@ -482,6 +482,10 @@ func _ready() -> void:
 		paused = true
 		if title_root != null:
 			title_root.visible = true
+	if "--shotbeach" in args:
+		_shot = true
+		player.global_position = Vector3(30, 3.0, 168)
+		player.rotate_y(PI)   # вдоль берега к морю (+Z)
 	if "--shotfauna" in args:
 		_shot = true
 		player.global_position = Vector3(52, 1.6, 42)
@@ -655,6 +659,8 @@ uniform sampler2D grass : source_color, repeat_enable, filter_linear_mipmap;
 uniform sampler2D dirt : source_color, repeat_enable, filter_linear_mipmap;
 uniform float tile = 135.0;
 uniform float patch = 46.0;
+uniform float world_size = 720.0;
+uniform float beach_z = 196.0;
 float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vns(vec2 p){
 	vec2 i = floor(p); vec2 f = fract(p);
@@ -672,6 +678,11 @@ void fragment(){
 	vec3 col = mix(g, d, m);
 	float tint = vns(UV * (patch * 0.26) + vec2(3.3, 7.7)); // крупные свет/тёмные зоны травы
 	col *= mix(0.80, 1.13, tint);
+	// песчаный пляж у воды (+Z край мира); кромка гуляет шумом
+	float wz = (UV.y - 0.5) * world_size;
+	float edge = beach_z + vns(UV * 40.0) * 6.0;
+	float sand_m = smoothstep(edge - 6.0, edge + 4.0, wz);
+	col = mix(col, d * vec3(1.22, 1.16, 1.02), sand_m);
 	ALBEDO = col;
 	ROUGHNESS = 1.0;
 }
