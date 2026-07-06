@@ -1775,20 +1775,25 @@ func _well(pos: Vector3) -> void:
 	_kk_place("well", pos, 2.4)
 
 func _hut_props(pos: Vector3, variant: int) -> void:
+	# хижина 9×9 — обставляем как укрытие: кровать/ковёр + вариативные пропсы
+	_furn("bedSingle", pos + Vector3(-2.6, 0.16, -2.4), 2.3, PI * 0.5)
+	_furn("rugRectangle", pos + Vector3(0.3, 0.17, 0.2), 2.2, randf() * PI)
 	match variant % 4:
 		0:
-			_prop_table(pos + Vector3(-1.3, 0, -1.6))
-			_prop_barrel(pos + Vector3(1.4, 0, -1.4))
+			_prop_table(pos + Vector3(2.0, 0.14, -2.2))
+			_prop_barrel(pos + Vector3(3.1, 0, -0.6))
 		1:
-			_prop_barrel(pos + Vector3(-1.5, 0, -1.5))
-			_prop_crate(pos + Vector3(1.3, 0, -1.4), 0.7)
-			_prop_crate(pos + Vector3(1.3, 0.7, -1.4), 0.5)
+			_prop_barrel(pos + Vector3(2.6, 0, -2.4))
+			_prop_crate(pos + Vector3(3.0, 0, -0.8), 0.7)
+			_prop_crate(pos + Vector3(3.0, 0.7, -0.8), 0.5)
+			_furn("bookcaseOpen", pos + Vector3(-3.2, 0.14, 1.6), 2.2, PI * 0.5)
 		2:
-			_prop_table(pos + Vector3(1.2, 0, -1.5))
-			_prop_stove(pos + Vector3(-1.6, 0, -1.6))
+			_prop_table(pos + Vector3(2.2, 0.14, -2.2))
+			_prop_stove(pos + Vector3(-2.8, 0, 2.2))
 		_:
-			_prop_barrel(pos + Vector3(-1.4, 0, -1.5))
-			_prop_crate(pos + Vector3(1.4, 0, -1.5), 0.8)
+			_prop_barrel(pos + Vector3(2.8, 0, -2.2))
+			_prop_crate(pos + Vector3(3.1, 0, -0.5), 0.8)
+			_furn("pottedPlant", pos + Vector3(-3.1, 0.14, 2.6), 2.0)
 
 func _furn(nm: String, pos: Vector3, sc: float, rot: float = 0.0) -> bool:
 	# мебель из Kenney Furniture Kit (CC0); модели миниатюрные — масштаб ~2.5 к росту
