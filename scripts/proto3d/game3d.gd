@@ -251,6 +251,7 @@ var m_log: StandardMaterial3D
 var m_floor: StandardMaterial3D
 var m_rock: StandardMaterial3D
 var m_roof: StandardMaterial3D
+var m_path_blocky: StandardMaterial3D
 
 var pitch := 0.0
 var stun := 0.0
@@ -521,8 +522,8 @@ func _build_materials() -> void:
 		# роблокс-земля: ярко-зелёная, мягкие пятна двух оттенков (без текстур — чистый flat-стиль)
 		var bgsh := Shader.new()
 		bgsh.code = """shader_type spatial;
-uniform vec3 g1 = vec3(0.33, 0.65, 0.28);
-uniform vec3 g2 = vec3(0.45, 0.79, 0.33);
+uniform vec3 g1 = vec3(0.36, 0.68, 0.31);
+uniform vec3 g2 = vec3(0.43, 0.76, 0.34);
 uniform float patch = 46.0;
 float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vns(vec2 p){
@@ -534,7 +535,10 @@ float vns(vec2 p){
 }
 void fragment(){
 	float m = vns(UV * patch) * 0.62 + vns(UV * patch * 3.1 + vec2(11.0, 5.0)) * 0.38;
-	ALBEDO = mix(g1, g2, smoothstep(0.35, 0.75, m));
+	vec3 col = mix(g1, g2, smoothstep(0.30, 0.80, m));
+	float ck = mod(floor(UV.x * 330.0) + floor(UV.y * 330.0), 2.0);   // клетка 2×2 м, едва заметная (роблокс-газон)
+	col *= mix(0.985, 1.015, ck);
+	ALBEDO = col;
 	ROUGHNESS = 1.0;
 }
 """
@@ -736,10 +740,11 @@ func _build_environment() -> void:
 	sun.light_energy = 1.2
 	sun.light_color = Color(1.0, 0.94, 0.83)   # тёплый солнечный свет (не белый «прожектор»)
 	sun.shadow_enabled = not _mobile   # на телефоне тени выключены (тяжело)
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS   # дешевле для большого леса
-	sun.directional_shadow_max_distance = 75.0   # тени только вблизи (туман скрывает дальние) → перф ок
-	sun.shadow_blur = 1.5                          # мягче края
-	sun.shadow_bias = 0.04
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL   # 1 сплит: нет мерцания на границах сплитов
+	sun.directional_shadow_max_distance = 70.0   # тени только вблизи (туман скрывает дальние) → перф ок
+	sun.shadow_blur = 2.2                          # мягче края (скрывает остаточный шиммер)
+	sun.shadow_bias = 0.06
+	sun.shadow_normal_bias = 3.0
 	add_child(sun)
 	# луна — второй directional light; ProceduralSkyMaterial рисует её диск в небе (не зависит от тумана)
 	moon = DirectionalLight3D.new()
@@ -1590,7 +1595,11 @@ func _path(a: Vector3, b: Vector3) -> void:
 	seg.mesh = bm
 	var dtex: Variant = load("res://art/textures/dirt.png") if ResourceLoader.exists("res://art/textures/dirt.png") else null
 	if dtex != null:
-		if _path_shader == null:
+		if CC.BLOCKY:
+			if m_path_blocky == null:
+				m_path_blocky = _mat(Color(0.78, 0.68, 0.50))   # песочная дорожка (роблокс)
+			seg.material_override = m_path_blocky
+		elif _path_shader == null:
 			_path_shader = Shader.new()
 			_path_shader.code = """shader_type spatial;
 uniform sampler2D dirt : source_color, repeat_enable, filter_linear_mipmap;
@@ -1615,13 +1624,12 @@ void fragment(){
 	ROUGHNESS = 1.0;
 }
 """
-		var psh := ShaderMaterial.new()
-		psh.shader = _path_shader
-		psh.set_shader_parameter("dirt", dtex)
-		psh.set_shader_parameter("len", length)
-		if CC.BLOCKY:
-			psh.set_shader_parameter("bright", 1.5)   # светлые роблокс-дорожки
-		seg.material_override = psh
+		if not CC.BLOCKY:
+			var psh := ShaderMaterial.new()
+			psh.shader = _path_shader
+			psh.set_shader_parameter("dirt", dtex)
+			psh.set_shader_parameter("len", length)
+			seg.material_override = psh
 	else:
 		var pmat := _mat(Color(0.30, 0.24, 0.16))
 		seg.material_override = pmat
@@ -2789,7 +2797,7 @@ void fragment() {
 	restart_btn.pressed.connect(_restart_game)
 	layer.add_child(restart_btn)
 	revive_btn = Button.new()
-	revive_btn.text = "Воскреснуть (реклама)"
+	revive_btn.text = "Воскреснуть (реклама)" if CC.ADS_UI else "Воскреснуть"
 	revive_btn.size = Vector2(300, 60)
 	revive_btn.position = Vector2(vp.x * 0.5 - 150, vp.y - 230)
 	_style_button(revive_btn, Color(0.82, 0.6, 0.16))   # золотой — выделяется
@@ -3036,22 +3044,23 @@ func _build_title() -> void:
 	title_root.add_child(bjournal)
 	var bgentle := Button.new()
 	bgentle.text = "Страх: Мягкий" if gentle else "Страх: Жуткий"
-	bgentle.size = Vector2(135, 50)
+	bgentle.size = Vector2(280, 50)
 	bgentle.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 218)
-	_style_button(bgentle, Color(0.5, 0.38, 0.55), 17)
+	_style_button(bgentle, Color(0.5, 0.38, 0.55), 19)
 	bgentle.pressed.connect(func():
 		gentle = not gentle
 		_save_game()
 		bgentle.text = "Страх: Мягкий" if gentle else "Страх: Жуткий"
 	)
 	title_root.add_child(bgentle)
-	var bnoads := Button.new()
-	bnoads.text = "Без рекламы" if noads else "Убрать рекламу"
-	bnoads.size = Vector2(135, 50)
-	bnoads.position = Vector2(vp.x * 0.5 + 5, vp.y * 0.42 + 218)
-	_style_button(bnoads, Color(0.55, 0.44, 0.2), 17)
-	bnoads.pressed.connect(_noads_pressed.bind(bnoads))
-	title_root.add_child(bnoads)
+	if CC.ADS_UI:
+		var bnoads := Button.new()
+		bnoads.text = "Без рекламы" if noads else "Убрать рекламу"
+		bnoads.size = Vector2(280, 50)
+		bnoads.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 280)
+		_style_button(bnoads, Color(0.55, 0.44, 0.2), 17)
+		bnoads.pressed.connect(_noads_pressed.bind(bnoads))
+		title_root.add_child(bnoads)
 	if streak > 0:
 		var st := Label.new()
 		st.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -3098,8 +3107,8 @@ func _start_game() -> void:
 	if tutorial_label != null:
 		tutorial_label.visible = true
 		tutorial_label.modulate.a = 1.0
-	if not show_touch:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if not _device_mobile:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED   # десктоп: свободный взгляд мышью/тачпадом (без зажатия)
 	if _new_daily and done_label != null:
 		done_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
 		done_label.text = "Награда дня! Серия: %d дн.  +%d жизни сегодня" % [streak, daily_bonus]
@@ -3180,7 +3189,7 @@ func _toggle_pause() -> void:
 		journal_panel.visible = false   # иначе дневник залипал на экране при захваченной мыши
 	if paused:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	elif not show_touch:
+	elif not _device_mobile:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _resume_game() -> void:
@@ -3491,7 +3500,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_tree().quit()
 		else:
 			_toggle_pause()
-	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE and not show_touch and not paused:
+	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE and not _device_mobile and not paused:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif show_touch and event is InputEventScreenTouch:
 		var vp := get_viewport().get_visible_rect().size
@@ -3645,8 +3654,8 @@ func _physics_process(delta: float) -> void:
 		_cd = 2.5
 		last_seen = player.global_position
 		_play(snd_stinger)
-		if flash_btn != null and not _autoplay and not flashlight_on:
-			flash_btn.visible = true      # предложить фонарик на эту ночь
+		if flash_btn != null and not _autoplay and not flashlight_on and CC.ADS_UI:
+			flash_btn.visible = true      # предложить фонарик на эту ночь (черновик монетизации)
 			flash_btn_t = 12.0
 		if analytics != null and not _autoplay:
 			analytics.log_event("night_reached", {"night": nights})
@@ -3691,7 +3700,8 @@ func _physics_process(delta: float) -> void:
 
 func _day_night() -> void:
 	var t := fmod(clock, DAY_LEN) / DAY_LEN
-	sun.rotation_degrees = Vector3(lerpf(-8.0, -172.0, t), -40, 0)
+	var tq := floorf(fmod(clock, DAY_LEN) / 0.25) * 0.25 / DAY_LEN   # шаг 0.25с: стабильная карта теней (без пер-кадрового дрожания)
+	sun.rotation_degrees = Vector3(lerpf(-8.0, -172.0, tq), -40, 0)
 	# плавный коэффициент ночи (0 днём → 1 в глубокой ночи)
 	var nf := clampf(smoothstep(0.48, 0.58, t) - smoothstep(0.92, 1.0, t), 0.0, 1.0)
 	if sky_mat != null:
@@ -4131,9 +4141,8 @@ func _soft_respawn() -> void:
 	wake = 3.5            # передышка: охота не ловит, пока отрываешься (сердечки обновятся в _refresh_hud)
 
 func _revive_via_ad() -> void:
-	# «Воскреснуть (реклама)»: rewarded-ролик → награда в _on_rewarded.
-	# С заглушкой награда мгновенная (как раньше); с реальным SDK — после досмотра ролика.
-	if ads != null:
+	# «Воскреснуть»: при скрытом рекламном UI — напрямую; при ADS_UI — через rewarded-ролик.
+	if ads != null and CC.ADS_UI:
 		ads.show_rewarded("revive")
 	else:
 		_revive()
