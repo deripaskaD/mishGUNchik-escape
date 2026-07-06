@@ -767,7 +767,12 @@ func _build_environment() -> void:
 	moon.light_color = Color(0.70, 0.80, 1.0)
 	moon.light_energy = 0.0
 	moon.light_angular_distance = 5.0   # крупный диск = луна
-	moon.shadow_enabled = false
+	moon.shadow_enabled = false          # включается ночью в _day_night (лунные тени деревьев)
+	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	moon.directional_shadow_max_distance = 45.0
+	moon.shadow_blur = 2.8
+	moon.shadow_bias = 0.06
+	moon.shadow_normal_bias = 3.0
 	moon.visible = false
 	add_child(moon)
 	var we := WorldEnvironment.new()
@@ -3880,7 +3885,8 @@ func _day_night() -> void:
 	env.tonemap_exposure = lerpf(0.85, 0.78, nf)   # было 1.06 — выжигало в белое; теперь не пересвечено
 	if moon != null:                                   # прохладная лунная подсветка ночью
 		moon.visible = nf > 0.02
-		moon.light_energy = lerpf(0.0, 0.30, nf)
+		moon.light_energy = lerpf(0.0, 0.34, nf)
+		moon.shadow_enabled = (not _mobile) and nf > 0.5   # лунные тени деревьев (ночью пропадали — солнце гасло)
 	if flashlight != null:                             # фонарик-награда: горит ночью, гаснет на рассвете
 		if nf < 0.3:
 			flashlight_on = false
