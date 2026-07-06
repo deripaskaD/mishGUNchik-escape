@@ -206,6 +206,8 @@ var gfx_btn: Button
 var _muted := false
 var _yacht_announced := false
 var _perf_test := false
+var critters: Array = []   # амбиентная фауна: {node, ap, st, t, dir, spd, base_anim}
+var bats: Array = []       # ночные летучие мыши: пивоты кругового полёта
 var _perf_t := 0.0
 var _perf_day: Array = []
 var _perf_night: Array = []
@@ -370,6 +372,8 @@ func _ready() -> void:
 	_make_timokha()
 	_build_quests()
 	_flush_batches()   # весь накопленный лес/декор → MultiMesh (после ВСЕХ строителей)
+	_spawn_critters()
+	_spawn_bats()
 	if not _autoplay:
 		_build_rain()
 	_build_hud()
@@ -475,6 +479,15 @@ func _ready() -> void:
 		paused = true
 		if title_root != null:
 			title_root.visible = true
+	if "--shotfauna" in args:
+		_shot = true
+		player.global_position = Vector3(52, 1.6, 42)
+		if not critters.is_empty():
+			var cn := critters[0]["node"] as Node3D
+			cn.position = Vector3(52, _terrain_h(52, 34), 34)   # олень в кадр
+			var cf := critters[3]["node"] as Node3D if critters.size() > 3 else null
+			if cf != null:
+				cf.position = Vector3(49, _terrain_h(49, 36), 36)
 	if "--perf" in args:
 		_shot = true   # заморозка ИИ — чистый замер рендера
 		_perf_test = true
@@ -1049,6 +1062,7 @@ func _kit_house(pos: Vector3, variant: int) -> void:
 	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(6.0, 3.6, 6.36)), pos + Vector3(0, 4.0, 0)), m_roof)
 	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * 1.6), pos + Vector3(1.5, 4.7, -1.2)))
 	_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.3), pos + Vector3(2.2, 0, 3.6)))
+	_add_light(pos + Vector3(0, 2.4, -0.5), Color(1.0, 0.82, 0.55), 0.85, 5.5)   # тёплый свет внутри
 
 func _house_col(pos: Vector3) -> void:
 	# коллизии кит-дома 6×6×4: глухие стены + фронт с проёмом 2 м по центру
@@ -1142,10 +1156,17 @@ func _build_cabin() -> void:
 	_box(self, Vector3(0, 3.05, half - 0.05), Vector3(3.2, 0.35, 0.42), m_log, false)
 	# тёплый свет внутри — ночью льётся из двери и окон
 	cabin_light = _add_light(Vector3(0, 2.2, 0), Color(1.0, 0.78, 0.45), 0.0, 7.5)
-	# интерьер: стол + котёл (квест варки)
-	_box(self, Vector3(2.4, 0.95, -2.6), Vector3(1.8, 0.12, 1.0), m_floor, false)
-	for c in [Vector3(-0.8, 0.47, -0.4), Vector3(0.8, 0.47, -0.4), Vector3(-0.8, 0.47, 0.4), Vector3(0.8, 0.47, 0.4)]:
-		_box(self, Vector3(2.4, 0, -2.6) + c, Vector3(0.12, 0.95, 0.12), m_floor, false)
+	# интерьер: стол с клеёнкой + стулья + котёл (квест варки)
+	if _furn("tableCloth", Vector3(2.4, 0.14, -2.6), 2.6, PI * 0.5):
+		_furn("chair", Vector3(1.4, 0.14, -2.5), 2.5, -PI * 0.5)
+		_furn("stoolBarSquare", Vector3(3.3, 0.14, -2.2), 2.4)
+	else:
+		_box(self, Vector3(2.4, 0.95, -2.6), Vector3(1.8, 0.12, 1.0), m_floor, false)
+		for c in [Vector3(-0.8, 0.47, -0.4), Vector3(0.8, 0.47, -0.4), Vector3(-0.8, 0.47, 0.4), Vector3(0.8, 0.47, 0.4)]:
+			_box(self, Vector3(2.4, 0, -2.6) + c, Vector3(0.12, 0.95, 0.12), m_floor, false)
+	_furn("rugRectangle", Vector3(0.4, 0.15, 0.6), 2.4, PI * 0.15)
+	_furn("bookcaseOpen", Vector3(-4.0, 0.14, 1.6), 2.4, PI * 0.5)
+	_furn("pottedPlant", Vector3(-3.9, 0.14, 3.4), 2.2)
 	_cauldron(Vector3(-1.8, 0, -2.8))
 	# детали интерьера/экстерьера
 	_porch(half, H)
@@ -1734,6 +1755,123 @@ func _hut_props(pos: Vector3, variant: int) -> void:
 			_prop_barrel(pos + Vector3(-1.4, 0, -1.5))
 			_prop_crate(pos + Vector3(1.4, 0, -1.5), 0.8)
 
+func _furn(nm: String, pos: Vector3, sc: float, rot: float = 0.0) -> bool:
+	# мебель из Kenney Furniture Kit (CC0); модели миниатюрные — масштаб ~2.5 к росту
+	var path := "res://art/models/furniture/%s.glb" % nm
+	if not ResourceLoader.exists(path):
+		return false
+	var inst: Node3D = (load(path) as PackedScene).instantiate()
+	inst.position = pos
+	inst.rotation.y = rot
+	inst.scale = Vector3.ONE * sc
+	add_child(inst)
+	return true
+
+func _spawn_critters() -> void:
+	# живность «99 ночей»: олени и лисы бродят днём, убегают от игрока, ночью прячутся
+	if _autoplay:
+		return
+	var defs := [["Deer", 0.85], ["Deer", 0.9], ["Stag", 1.05], ["Fox", 0.65], ["Fox", 0.7]]
+	if _mobile:
+		defs = [["Deer", 0.9], ["Fox", 0.7]]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 777
+	for d in defs:
+		var path := "res://art/models/animals/%s.gltf" % d[0]
+		if not ResourceLoader.exists(path):
+			return
+		var inst: Node3D = (load(path) as PackedScene).instantiate()
+		var x := rng.randf_range(-90.0, 90.0)
+		var z := rng.randf_range(-90.0, 60.0)
+		if Vector2(x, z).length() < CLEARING + 6.0:
+			x += 60.0
+		inst.position = Vector3(x, _terrain_h(x, z), z)
+		inst.scale = Vector3.ONE * (d[1] as float)
+		add_child(inst)
+		var ap := inst.find_child("AnimationPlayer", true, false) as AnimationPlayer
+		if ap != null and ap.has_animation("Idle"):
+			ap.play("Idle")
+		critters.append({"node": inst, "ap": ap, "st": "idle", "t": rng.randf_range(2.0, 5.0), "dir": Vector3.ZERO, "spd": 0.0})
+
+func _spawn_bats() -> void:
+	# летучие мыши кружат ночью над жуткими точками (Quaternius Monster Pack, CC0)
+	if _autoplay or not ResourceLoader.exists("res://art/models/monster/Bat.fbx"):
+		return
+	var spots := [Vector3(-110, 7.0, -130), Vector3(-150, 5.5, 92), Vector3(-60, 6.5, -185)]
+	if _mobile:
+		spots = [Vector3(-110, 7.0, -130)]
+	var ps := load("res://art/models/monster/Bat.fbx") as PackedScene
+	for spot in spots:
+		var pivot := Node3D.new()
+		pivot.position = spot
+		add_child(pivot)
+		for k in 2:
+			var bat: Node3D = ps.instantiate()
+			bat.position = Vector3(4.5 + k * 1.8, k * 0.8, 0)
+			bat.scale = Vector3.ONE * 0.22
+			bat.rotation.y = PI   # носом по касательной круга
+			pivot.add_child(bat)
+			var bap := bat.find_child("AnimationPlayer", true, false) as AnimationPlayer
+			if bap != null:
+				bap.play("BatArmature|Bat_Flying")
+				bap.speed_scale = 1.4
+		pivot.visible = false
+		bats.append(pivot)
+
+func _update_critters(delta: float) -> void:
+	var night := _is_night()
+	for b in bats:
+		var bp := b as Node3D
+		bp.visible = night
+		if night:
+			bp.rotation.y += delta * 0.85
+	if critters.is_empty():
+		return
+	for c in critters:
+		var n := c["node"] as Node3D
+		if night:
+			n.visible = false
+			continue
+		n.visible = true
+		c["t"] -= delta
+		var to_player := player.global_position - n.global_position
+		to_player.y = 0.0
+		if c["st"] != "flee" and to_player.length() < 8.0:
+			c["st"] = "flee"
+			c["t"] = 2.6
+			c["dir"] = -to_player.normalized()
+			c["spd"] = 5.2
+			var apf := c["ap"] as AnimationPlayer
+			if apf != null and apf.has_animation("Gallop"):
+				apf.play("Gallop")
+		if c["t"] <= 0.0:
+			var ap2 := c["ap"] as AnimationPlayer
+			if c["st"] == "walk" or c["st"] == "flee":
+				c["st"] = "idle"
+				c["t"] = randf_range(2.5, 6.0)
+				c["spd"] = 0.0
+				if ap2 != null:
+					ap2.play("Idle" if ap2.has_animation("Idle") else ap2.get_animation_list()[0])
+			else:
+				c["st"] = "walk"
+				c["t"] = randf_range(3.0, 7.0)
+				var a := randf() * TAU
+				c["dir"] = Vector3(cos(a), 0, sin(a))
+				c["spd"] = 1.3
+				if ap2 != null:
+					if ap2.has_animation("Walk"):
+						ap2.play("Walk")
+					elif ap2.has_animation("Gallop"):
+						ap2.play("Gallop", -1, 0.45)
+		if c["spd"] > 0.0:
+			var dirv := c["dir"] as Vector3
+			var np := n.position + dirv * (c["spd"] as float) * delta
+			np.x = clampf(np.x, -WORLD + 10.0, WORLD - 10.0)
+			np.z = clampf(np.z, -WORLD + 10.0, WORLD - 40.0)
+			np.y = _terrain_h(np.x, np.z)
+			n.position = np
+			n.rotation.y = atan2(dirv.x, dirv.z)
+
 func _prop_model(nm: String, pos: Vector3, sc: float) -> bool:
 	# проп из Fantasy Props MegaKit (CC0); false = модели нет (фолбэк на примитив)
 	var path := "res://art/models/props99/%s.gltf" % nm
@@ -1765,6 +1903,8 @@ func _prop_crate(pos: Vector3, s: float) -> void:
 	_box(self, pos + Vector3(0, s * 0.5, 0), Vector3(s, s, s), _mat(Color(0.55, 0.42, 0.26)), false)
 
 func _prop_table(pos: Vector3) -> void:
+	if _furn("tableCloth", pos, 2.4, randf() * PI):
+		return
 	_box(self, pos + Vector3(0, 0.95, 0), Vector3(1.4, 0.12, 0.8), m_floor, false)
 	for cc in [Vector3(-0.6, 0.47, -0.3), Vector3(0.6, 0.47, -0.3), Vector3(-0.6, 0.47, 0.3), Vector3(0.6, 0.47, 0.3)]:
 		_box(self, pos + cc, Vector3(0.1, 0.95, 0.1), m_floor, false)
@@ -1934,6 +2074,39 @@ func _build_forest() -> void:
 			if bz > WORLD - 42.0 and abs(bx) < 55.0:   # не в озере/у яхты
 				continue
 			_tree(Vector3(bx, 0, bz), rng.randf_range(1.0, 1.6), rng.randf() < 0.3)
+	# хэллоуин-декор в глуши (KayKit Halloween Bits, CC0): тыквы/надгробия/черепа у кривых деревьев
+	if ResourceLoader.exists("res://art/models/halloween/pumpkin_orange.gltf") and not _autoplay:
+		var hw := ["pumpkin_orange", "pumpkin_orange_small", "pumpkin_yellow", "pumpkin_yellow_small", "pumpkin_orange_jackolantern", "gravestone", "gravemarker_B", "post_skull", "skull_candle"]
+		var placed_h := 0
+		var att_h := 0
+		while placed_h < (10 if _mobile else 26) and att_h < 200:
+			att_h += 1
+			var hx := rng.randf_range(-WORLD + 8, WORLD - 8)
+			var hz := rng.randf_range(-WORLD + 8, WORLD - 8)
+			if Vector2(hx, hz).length() < WORLD * 0.62:
+				continue   # только глубокая жуткая зона
+			if (hz > WORLD - 42.0 and absf(hx) < 55.0) or _on_path(hx, hz):
+				continue
+			var nm_h: String = hw[rng.randi() % hw.size()]
+			var sc_h := rng.randf_range(1.4, 2.2) if nm_h.begins_with("pumpkin") else rng.randf_range(1.3, 1.7)
+			var hw_inst: Node3D = (load("res://art/models/halloween/%s.gltf" % nm_h) as PackedScene).instantiate()
+			hw_inst.position = Vector3(hx, _terrain_h(hx, hz), hz)
+			hw_inst.rotation.y = rng.randf() * TAU
+			hw_inst.scale = Vector3.ONE * sc_h
+			add_child(hw_inst)   # сырой инстанс: вшитый материал кита белеет в MultiMesh
+			placed_h += 1
+		# кладбище у могильника «кости» (-150,92): надгробия вокруг креста
+		for gp in [Vector3(-153.0, 0, 90.5), Vector3(-147.5, 0, 91.0), Vector3(-151.5, 0, 94.5), Vector3(-148.0, 0, 94.0)]:
+			var gnm := "gravestone" if rng.randf() < 0.5 else "grave_A"
+			var g_inst: Node3D = (load("res://art/models/halloween/%s.gltf" % gnm) as PackedScene).instantiate()
+			g_inst.position = gp
+			g_inst.rotation.y = rng.randf_range(-0.4, 0.4)
+			g_inst.scale = Vector3.ONE * 1.5
+			add_child(g_inst)
+		var lt_inst: Node3D = (load("res://art/models/halloween/lantern_standing.gltf") as PackedScene).instantiate()
+		lt_inst.position = Vector3(-150.8, 0, 88.6)
+		lt_inst.scale = Vector3.ONE * 1.6
+		add_child(lt_inst)
 	# подлесок «99 ночей»: папоротники/трава/клевер (без коллизий, в батчах)
 	if not n99_ground.is_empty() and not _autoplay:
 		for i in (170 if _mobile else 520):
@@ -4403,6 +4576,7 @@ func _process(delta: float) -> void:
 			cam.position = Vector3(bx, 0.7 + by, 0)
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
+	_update_critters(delta)
 	if _perf_test:
 		_perf_t += delta
 		if _perf_t > 2.0 and _perf_t < 8.0:
@@ -5543,6 +5717,8 @@ func _door_leaf(half: float, h: float) -> void:
 	add_child(pivot)
 
 func _bed(pos: Vector3) -> void:
+	if _furn("bedSingle", pos + Vector3(0, 0.14, 0), 2.5, PI * 0.5):
+		return
 	_box(self, pos + Vector3(0, 0.25, 0), Vector3(2.0, 0.4, 1.0), m_floor, false)
 	_box(self, pos + Vector3(0, 0.55, 0), Vector3(1.9, 0.2, 0.9), _mat(Color(0.55, 0.5, 0.45)), false)
 	_box(self, pos + Vector3(-0.65, 0.7, 0), Vector3(0.5, 0.18, 0.7), _mat(Color(0.9, 0.9, 0.85)), false)
