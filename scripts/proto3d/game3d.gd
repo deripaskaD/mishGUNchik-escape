@@ -205,6 +205,10 @@ var snd_btn: Button
 var gfx_btn: Button
 var _muted := false
 var _yacht_announced := false
+var _perf_test := false
+var _perf_t := 0.0
+var _perf_day: Array = []
+var _perf_night: Array = []
 var restart_btn: Button
 var win_quit_btn: Button
 const MAX_LIVES := 3
@@ -281,7 +285,7 @@ var n99_spooky: Array = []
 var n99_dead: Array = []
 var n99_rocks: Array = []
 var n99_ground: Array = []
-var m_path_blocky: StandardMaterial3D
+var end_bg: TextureRect   # фон экрана конца (поимка/победа — разные арты)
 var cabin_light: OmniLight3D   # тёплый свет избы (включается ночью)
 
 var pitch := 0.0
@@ -469,9 +473,15 @@ func _ready() -> void:
 		paused = true
 		if title_root != null:
 			title_root.visible = true
+	if "--perf" in args:
+		_shot = true   # заморозка ИИ — чистый замер рендера
+		_perf_test = true
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)   # мерить рендер, не vsync
+		player.global_position = Vector3(11.5, 1.7, 11.5)
+		player.rotate_y(PI * 0.25)   # вид на избу + лес (типовая насыщенная сцена)
 	if "--shotdock" in args:
 		_shot = true
-		player.global_position = Vector3(10, 1.5, 186)
+		player.global_position = Vector3(12, 2.2, 205)
 		player.rotate_y(PI)   # развернуть к причалу/яхте (+Z), фонарь-маяк в кадре
 	if "--shotsky" in args:
 		_shot = true
@@ -588,7 +598,7 @@ func _add_light(pos: Vector3, color: Color, energy: float, rng: float) -> OmniLi
 func _build_materials() -> void:
 	var gtex: Variant = load("res://art/textures/grass.png") if ResourceLoader.exists("res://art/textures/grass.png") else null
 	var dtex: Variant = load("res://art/textures/dirt.png") if ResourceLoader.exists("res://art/textures/dirt.png") else null
-	if CC.BLOCKY:
+	if CC.BLOCKY and (gtex == null or dtex == null):
 		# роблокс-земля: ярко-зелёная, мягкие пятна двух оттенков (без текстур — чистый flat-стиль)
 		var bgsh := Shader.new()
 		bgsh.code = """shader_type spatial;
@@ -1737,11 +1747,7 @@ func _path(a: Vector3, b: Vector3) -> void:
 	seg.mesh = bm
 	var dtex: Variant = load("res://art/textures/dirt.png") if ResourceLoader.exists("res://art/textures/dirt.png") else null
 	if dtex != null:
-		if CC.BLOCKY:
-			if m_path_blocky == null:
-				m_path_blocky = _mat(Color(0.78, 0.68, 0.50))   # песочная дорожка (роблокс)
-			seg.material_override = m_path_blocky
-		elif _path_shader == null:
+		if _path_shader == null:
 			_path_shader = Shader.new()
 			_path_shader.code = """shader_type spatial;
 uniform sampler2D dirt : source_color, repeat_enable, filter_linear_mipmap;
@@ -1766,12 +1772,12 @@ void fragment(){
 	ROUGHNESS = 1.0;
 }
 """
-		if not CC.BLOCKY:
-			var psh := ShaderMaterial.new()
-			psh.shader = _path_shader
-			psh.set_shader_parameter("dirt", dtex)
-			psh.set_shader_parameter("len", length)
-			seg.material_override = psh
+		var psh := ShaderMaterial.new()
+		psh.shader = _path_shader
+		psh.set_shader_parameter("dirt", dtex)
+		psh.set_shader_parameter("len", length)
+		psh.set_shader_parameter("bright", 1.35 if CC.BLOCKY else 1.0)   # яркая тропа в детской палитре
+		seg.material_override = psh
 	else:
 		var pmat := _mat(Color(0.30, 0.24, 0.16))
 		seg.material_override = pmat
@@ -2159,22 +2165,30 @@ void fragment() {
 	add_child(water)
 	# причал + яхта (у дальнего края воды)
 	_box(self, Vector3(8, 0.3, 200), Vector3(2.6, 0.3, 16), m_log, false)
-	var boat := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(3.4, 1.3, 7.0)
-	boat.mesh = bm
-	boat.position = Vector3(8, 0.85, 214)
-	boat.material_override = _mat(Color(0.7, 0.65, 0.5))
-	add_child(boat)
-	var mast := MeshInstance3D.new()
-	var mm := CylinderMesh.new()
-	mm.top_radius = 0.12
-	mm.bottom_radius = 0.14
-	mm.height = 6.0
-	mast.mesh = mm
-	mast.position = Vector3(8, 3.5, 214)
-	mast.material_override = m_log
-	add_child(mast)
+	# яхта: корабль из Kenney Pirate Kit (CC0) вместо коробки с мачтой
+	if ResourceLoader.exists("res://art/models/pirate/ship-small.glb"):
+		var ship: Node3D = (load("res://art/models/pirate/ship-small.glb") as PackedScene).instantiate()
+		ship.position = Vector3(8, -0.12, 215)
+		ship.rotation.y = PI   # носом в открытое море
+		ship.scale = Vector3.ONE * 1.1
+		add_child(ship)
+	else:
+		var boat := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(3.4, 1.3, 7.0)
+		boat.mesh = bm
+		boat.position = Vector3(8, 0.85, 214)
+		boat.material_override = _mat(Color(0.7, 0.65, 0.5))
+		add_child(boat)
+		var mast := MeshInstance3D.new()
+		var mm := CylinderMesh.new()
+		mm.top_radius = 0.12
+		mm.bottom_radius = 0.14
+		mm.height = 6.0
+		mast.mesh = mm
+		mast.position = Vector3(8, 3.5, 214)
+		mast.material_override = m_log
+		add_child(mast)
 	_dock_lantern(Vector3(5.0, 0, 195))   # фонарь у входа на причал — маяк точки побега
 	# деревянный мост на подходе к причалу
 	var brp := "res://art/models/props/bridge_wood.glb"
@@ -3133,14 +3147,14 @@ void fragment() {
 	win_overlay.visible = false
 	layer.add_child(win_overlay)
 	if ResourceLoader.exists("res://art/ui/lose_bg.jpg"):
-		var lbg := TextureRect.new()
-		lbg.texture = load("res://art/ui/lose_bg.jpg")
-		lbg.set_anchors_preset(Control.PRESET_FULL_RECT)
-		lbg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		lbg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		lbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		lbg.modulate = Color(0.75, 0.75, 0.8)   # приглушить под текст статистики
-		win_overlay.add_child(lbg)
+		end_bg = TextureRect.new()
+		end_bg.texture = load("res://art/ui/lose_bg.jpg")
+		end_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		end_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		end_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		end_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		end_bg.modulate = Color(0.75, 0.75, 0.8)   # приглушить под текст статистики
+		win_overlay.add_child(end_bg)
 	win_label = Label.new()
 	win_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	win_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -3240,17 +3254,26 @@ void fragment() {
 	pause_overlay.add_child(pause_controls)
 	# ── Дневник: оверлей со всеми найденными записками ──
 	journal_panel = ColorRect.new()
-	journal_panel.color = Color(0.05, 0.04, 0.03, 0.95)
+	journal_panel.color = Color(0.05, 0.04, 0.03, 0.97)
 	journal_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	journal_panel.visible = false
 	layer.add_child(journal_panel)
+	var jpaper := ResourceLoader.exists("res://art/ui/journal_bg.jpg")
+	if jpaper:
+		var jbg := TextureRect.new()
+		jbg.texture = load("res://art/ui/journal_bg.jpg")
+		jbg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		jbg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		jbg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		jbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		journal_panel.add_child(jbg)
 	var jtitle := Label.new()
 	jtitle.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	jtitle.offset_top = 26
 	jtitle.offset_bottom = 76
 	jtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	jtitle.add_theme_font_size_override("font_size", 34)
-	jtitle.add_theme_color_override("font_color", Color(0.95, 0.86, 0.6))
+	jtitle.add_theme_color_override("font_color", Color(0.34, 0.20, 0.09) if jpaper else Color(0.95, 0.86, 0.6))
 	jtitle.text = "ДНЕВНИК ОСТРОВА"
 	journal_panel.add_child(jtitle)
 	var jscroll := ScrollContainer.new()
@@ -3262,7 +3285,7 @@ void fragment() {
 	journal_label.custom_minimum_size = Vector2(760, 0)
 	journal_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	journal_label.add_theme_font_size_override("font_size", 20)
-	journal_label.add_theme_color_override("font_color", Color(0.88, 0.84, 0.76))
+	journal_label.add_theme_color_override("font_color", Color(0.26, 0.17, 0.08) if jpaper else Color(0.88, 0.84, 0.76))
 	jscroll.add_child(journal_label)
 	var jclose := Button.new()
 	jclose.text = "Закрыть"
@@ -4287,6 +4310,43 @@ func _process(delta: float) -> void:
 			cam.position = Vector3(bx, 0.7 + by, 0)
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
+	if _perf_test:
+		_perf_t += delta
+		if _perf_t > 2.0 and _perf_t < 8.0:
+			_perf_day.append(Performance.get_monitor(Performance.TIME_FPS))
+		elif _perf_t >= 8.0 and _perf_t < 8.1 and clock < DAY_LEN * 0.7:
+			clock = DAY_LEN * 0.72   # переключить на ночь (луна, тени, фонари)
+		elif _perf_t > 10.0 and _perf_t < 16.0:
+			_perf_night.append(Performance.get_monitor(Performance.TIME_FPS))
+		elif _perf_t >= 16.0:
+			var f := FileAccess.open("user://perf_result.txt", FileAccess.WRITE)
+			var day_avg := 0.0
+			var day_min := 9999.0
+			for v in _perf_day:
+				day_avg += v
+				day_min = minf(day_min, v)
+			day_avg /= maxf(1.0, float(_perf_day.size()))
+			var night_avg := 0.0
+			var night_min := 9999.0
+			for v in _perf_night:
+				night_avg += v
+				night_min = minf(night_min, v)
+			night_avg /= maxf(1.0, float(_perf_night.size()))
+			var day_low := 0
+			for v in _perf_day:
+				if v < 50.0:
+					day_low += 1
+			var night_low := 0
+			for v in _perf_night:
+				if v < 50.0:
+					night_low += 1
+			f.store_line("day_fps_avg=%.1f day_fps_min=%.0f night_fps_avg=%.1f night_fps_min=%.0f" % [day_avg, day_min, night_avg, night_min])
+			f.store_line("day_frames_below50=%d/%d night_frames_below50=%d/%d" % [day_low, _perf_day.size(), night_low, _perf_night.size()])
+			f.store_line("draw_calls=%d primitives=%d" % [int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)), int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))])
+			f.store_line("video_mem=%.1fMB nodes=%d" % [Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))])
+			f.close()
+			print("[perf] записано")
+			get_tree().quit()
 	if mill_blades != null:   # вращение ротора мельницы вокруг своей оси
 		mill_blades.rotate_object_local(Vector3.RIGHT, delta * 0.6)
 	# молния + гром (редко, в дождь)
@@ -4321,7 +4381,7 @@ func _process(delta: float) -> void:
 		_update_radar()
 		_update_beacons()
 		_refresh_hud()
-	if (_shot or _shotin) and not _shot_saved:
+	if (_shot or _shotin) and not _shot_saved and not _perf_test:
 		_shot_t += delta
 		if _shot_t > 1.2:
 			_save_shot()
@@ -4994,6 +5054,8 @@ func _refresh_hud() -> void:
 	if lost:
 		hud.text = ""
 		_hide_gameplay_hud()
+		if end_bg != null:
+			end_bg.texture = load("res://art/ui/lose_bg.jpg")
 		if win_overlay != null:
 			win_overlay.visible = true
 			win_label.visible = true
@@ -5009,6 +5071,9 @@ func _refresh_hud() -> void:
 	if won:
 		hud.text = ""
 		_hide_gameplay_hud()
+		if end_bg != null and ResourceLoader.exists("res://art/ui/win_bg.jpg"):
+			end_bg.texture = load("res://art/ui/win_bg.jpg")
+			end_bg.modulate = Color(0.9, 0.9, 0.9)
 		if win_overlay != null:
 			win_overlay.visible = true
 			win_label.visible = true
