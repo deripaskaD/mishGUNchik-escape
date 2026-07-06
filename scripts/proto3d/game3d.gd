@@ -865,6 +865,36 @@ func _box(parent: Node, pos: Vector3, size: Vector3, mat: StandardMaterial3D, co
 		node.add_child(cs)
 	parent.add_child(node)
 
+func _house_trim(pos: Vector3, w: float, d: float, h: float, with_windows: bool) -> void:
+	# детализация построек (роблокс): белые угловые доски, конёк крыши, рама двери, ступенька, окна фасада
+	var trim := _mat(Color(0.97, 0.95, 0.90))
+	var ridge := _mat(Color(0.94, 0.34, 0.26))   # ярче крыши — читаемый акцент
+	for cx in [-1.0, 1.0]:
+		for cz in [-1.0, 1.0]:
+			_box(self, pos + Vector3(cx * w * 0.5, h * 0.5, cz * d * 0.5), Vector3(0.36, h, 0.36), trim, false)
+	_box(self, pos + Vector3(0, h + 1.52, 0), Vector3(w + 0.7, 0.30, 0.42), ridge, false)   # конёк
+	# рама двери (+Z фасад)
+	for dx in [-1.0, 1.0]:
+		_box(self, pos + Vector3(dx * 0.95, (h - 0.8) * 0.5, d * 0.5 + 0.03), Vector3(0.18, h - 0.8, 0.22), trim, false)
+	_box(self, pos + Vector3(0, h - 0.72, d * 0.5 + 0.03), Vector3(2.08, 0.18, 0.22), trim, false)
+	_box(self, pos + Vector3(0, 0.075, d * 0.5 + 0.55), Vector3(2.2, 0.15, 1.0), _mat(Color(0.72, 0.56, 0.36)), false)   # ступенька
+	if with_windows:
+		for wx in [-w * 0.28, w * 0.28]:
+			_box(self, pos + Vector3(wx, 1.55, d * 0.5 + 0.02), Vector3(1.15, 1.15, 0.12), trim, false)   # рама
+			var pane := MeshInstance3D.new()
+			var pb := BoxMesh.new()
+			pb.size = Vector3(0.9, 0.9, 0.08)
+			pane.mesh = pb
+			pane.position = pos + Vector3(wx, 1.55, d * 0.5 + 0.05)
+			var pm := _mat(Color(0.55, 0.75, 0.95, 0.85))
+			pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			pm.emission_enabled = true
+			pm.emission = Color(0.4, 0.5, 0.6)
+			pm.emission_energy_multiplier = 0.3
+			pane.material_override = pm
+			add_child(pane)
+			window_mats.append(pm)   # ночью тёплый свет (общий механизм)
+
 func _build_cabin() -> void:
 	# изба ~9x9, стены 3.2 м, проём-дверь спереди (+Z). Человеческий масштаб.
 	var H := 3.2
@@ -910,6 +940,7 @@ func _build_cabin() -> void:
 	_corner_stove(Vector3(3.3, 0, -3.3))
 	# перегородка с проходом (намёк на вторую комнату)
 	_box(self, Vector3(1.4, H * 0.5, -3.0), Vector3(0.25, H, 2.6), m_log, true)
+	_house_trim(Vector3.ZERO, half * 2, half * 2, H, true)
 	# печная труба над углом с печью + дымок из неё
 	var brick := _mat(Color(0.46, 0.32, 0.26))
 	_box(self, Vector3(3.0, 4.5, -3.0), Vector3(0.7, 1.9, 0.7), brick, false)
@@ -1045,6 +1076,7 @@ func _build_structures() -> void:
 	for h in HUTS:
 		_ground_shadow(h, 4.3)
 		_hut(h, 6.0, 6.0, 3.0, cols[i % cols.size()])
+		_house_trim(h, 6.0, 6.0, 3.0, true)
 		_hut_props(h, i)
 		i += 1
 	_camp_props()   # бочки/ящики/сундук/палатка у хижин (Survival Kit)
