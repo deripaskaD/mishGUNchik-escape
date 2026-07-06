@@ -2074,6 +2074,26 @@ func _build_forest() -> void:
 			if bz > WORLD - 42.0 and abs(bx) < 55.0:   # не в озере/у яхты
 				continue
 			_tree(Vector3(bx, 0, bz), rng.randf_range(1.0, 1.6), rng.randf() < 0.3)
+	# каменные плиты вдоль троп (RockPath из Nature MegaKit) — обочины читаются
+	if not n99_ground.is_empty() and not _autoplay:
+		var rp_scenes := [_n99("RockPath_Round_Wide"), _n99("RockPath_Round_Thin")]
+		var segs := []
+		for h3 in HUTS:
+			segs.append([Vector2.ZERO, Vector2(h3.x, h3.z)])
+		segs.append([Vector2.ZERO, Vector2(8.0, WORLD - 18.0)])
+		segs.append([Vector2.ZERO, Vector2(135.0, -150.0)])
+		segs.append([Vector2.ZERO, Vector2(-135.0, 150.0)])
+		for sg in segs:
+			var a2: Vector2 = sg[0]
+			var b2: Vector2 = sg[1]
+			var L := (b2 - a2).length()
+			var n_st := int(L / 26.0)
+			for k in n_st:
+				var tpar := (float(k) + rng.randf_range(0.3, 0.7)) / float(n_st)
+				var side := 2.4 * (1.0 if rng.randf() < 0.5 else -1.0)
+				var perp := (b2 - a2).normalized().orthogonal()
+				var pp := a2.lerp(b2, tpar) + perp * side
+				_batch_scene(rp_scenes[rng.randi() % 2], _yrot_scale(Vector3(pp.x, _terrain_h(pp.x, pp.y) + 0.02, pp.y), rng.randf() * TAU, rng.randf_range(0.8, 1.3)))
 	# хэллоуин-декор в глуши (KayKit Halloween Bits, CC0): тыквы/надгробия/черепа у кривых деревьев
 	if ResourceLoader.exists("res://art/models/halloween/pumpkin_orange.gltf") and not _autoplay:
 		var hw := ["pumpkin_orange", "pumpkin_orange_small", "pumpkin_yellow", "pumpkin_yellow_small", "pumpkin_orange_jackolantern", "gravestone", "gravemarker_B", "post_skull", "skull_candle"]

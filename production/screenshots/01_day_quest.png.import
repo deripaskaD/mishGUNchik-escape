@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cqgmpnfbn7uju"
-path="res://.godot/imported/shotjournal.png-915cd98b89a114a6cc7cf53b7bf2e6ca.ctex"
+uid="uid://bs6lepyoiw3qi"
+path="res://.godot/imported/01_day_quest.png-099b0ef62ef0a45712b01b1c055c13d2.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://production/screenshots/shotjournal.png"
-dest_files=["res://.godot/imported/shotjournal.png-915cd98b89a114a6cc7cf53b7bf2e6ca.ctex"]
+source_file="res://production/screenshots/01_day_quest.png"
+dest_files=["res://.godot/imported/01_day_quest.png-099b0ef62ef0a45712b01b1c055c13d2.ctex"]
 
 [params]
 

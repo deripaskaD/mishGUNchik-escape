@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://edblu3xuuxp0"
-path="res://.godot/imported/shotdark.png-eedb279cf94fe6f0262dba183c5f72e6.ctex"
+uid="uid://b6bq52tp5lndl"
+path="res://.godot/imported/05_cabin.png-9289f8d2ff03cc1c7f202deba398f54d.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://production/screenshots/shotdark.png"
-dest_files=["res://.godot/imported/shotdark.png-eedb279cf94fe6f0262dba183c5f72e6.ctex"]
+source_file="res://production/screenshots/05_cabin.png"
+dest_files=["res://.godot/imported/05_cabin.png-9289f8d2ff03cc1c7f202deba398f54d.ctex"]
 
 [params]
 

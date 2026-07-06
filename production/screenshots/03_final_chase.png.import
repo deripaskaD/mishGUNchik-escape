@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cbpdgnfrgq5wl"
-path="res://.godot/imported/shotchase.png-89d0ca6436a6bdffac2b13c269366741.ctex"
+uid="uid://cneypwr4m87rl"
+path="res://.godot/imported/03_final_chase.png-40d5374438fce4a018b5cfc891fcd55b.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://production/screenshots/shotchase.png"
-dest_files=["res://.godot/imported/shotchase.png-89d0ca6436a6bdffac2b13c269366741.ctex"]
+source_file="res://production/screenshots/03_final_chase.png"
+dest_files=["res://.godot/imported/03_final_chase.png-40d5374438fce4a018b5cfc891fcd55b.ctex"]
 
 [params]
 
