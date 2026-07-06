@@ -227,6 +227,8 @@ var win_overlay: ColorRect
 var win_label: Label
 var title_root: Control   # тайтл-экран (Играть/Графика/Дневник) — показывается на старте
 var custom_photo: Texture2D   # пользовательское фото персонажа (user://custom_photo.png)
+var choice_root: Control      # стартовый выбор: «фото друга» или стандартный персонаж
+var photo_chosen := false     # выбор сделан (сохраняется) — экран показывается один раз
 var _js_photo_cb: JavaScriptObject   # держим ссылку (иначе GC на вебе)
 
 # мини-карта-радар
@@ -342,6 +344,7 @@ func _ready() -> void:
 	_build_touch()
 	_build_radar()
 	_build_title()
+	_build_choice()
 	space = get_world_3d().direct_space_state
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # захват мыши — по кнопке «Играть» (решение о тайтле — в КОНЦЕ _ready, после разбора --shot* флагов)
 	if _shotin:
@@ -400,6 +403,11 @@ func _ready() -> void:
 			title_root.visible = false
 		if pause_overlay != null:
 			pause_overlay.visible = true
+	if "--shotchoice" in args:
+		_shot = true
+		paused = true
+		if choice_root != null:
+			choice_root.visible = true
 	if "--shottitle" in args:
 		_shot = true
 		paused = true
@@ -492,10 +500,13 @@ func _ready() -> void:
 			pause_controls.text = "Управление: левый джойстик — идти · правая зона свайп — камера\nкнопки БЕГ / ПРЫЖОК · кнопка ❚❚ — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
 		else:
 			pause_controls.text = "Управление: WASD — идти · Shift — бег · мышь — осмотр\nSpace — прыжок · Esc — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
-	# реальный игрок (не скриншот/не автоплей): показать тайтл-экран, мир на паузе до «Играть»
+	# реальный игрок (не скриншот/не автоплей): мир на паузе; первый запуск → выбор фото, дальше тайтл
 	if not (_shot or _shotin or _autoplay):
-		title_root.visible = true
 		paused = true
+		if photo_chosen or custom_photo != null:
+			title_root.visible = true
+		else:
+			choice_root.visible = true
 
 func _mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -2961,6 +2972,7 @@ func _load_save() -> void:
 	lowgfx = bool(data.get("lowgfx", false))
 	noads = bool(data.get("noads", false))
 	gentle = bool(data.get("gentle", false))
+	photo_chosen = bool(data.get("photo_chosen", false))
 	wins_total = int(data.get("wins", 0))
 	caught_total = int(data.get("tot_caught", 0))
 	best_nights = int(data.get("best_nights", 0))
@@ -2982,7 +2994,7 @@ func _save_game() -> void:
 		return   # тест/скриншот-режимы не пишут сейв
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f != null:
-		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights}))
+		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights, "photo_chosen": photo_chosen}))
 		f.close()
 
 func _load_custom_photo() -> void:
@@ -3056,6 +3068,8 @@ func _apply_new_photo(img: Image) -> void:
 		var k := 1024.0 / float(mx)
 		img.resize(int(img.get_width() * k), int(img.get_height() * k), Image.INTERPOLATE_LANCZOS)
 	img.save_png(CC.CUSTOM_PHOTO)
+	photo_chosen = true
+	_save_game()
 	get_tree().reload_current_scene()
 
 func _build_title() -> void:
@@ -3182,6 +3196,68 @@ func _build_title() -> void:
 		jl.layer = 6
 		add_child(jl)
 		journal_panel.reparent(jl)
+
+func _build_choice() -> void:
+	# первый запуск: «от кого убегаешь?» — фото друга или стандартный персонаж
+	var layer := CanvasLayer.new()
+	layer.layer = 6
+	add_child(layer)
+	choice_root = ColorRect.new()
+	choice_root.color = Color(0.05, 0.07, 0.12, 0.96)
+	choice_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	choice_root.visible = false
+	layer.add_child(choice_root)
+	var vp := get_viewport().get_visible_rect().size
+	var q := Label.new()
+	q.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	q.offset_top = vp.y * 0.18
+	q.offset_bottom = vp.y * 0.18 + 64
+	q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	q.add_theme_font_size_override("font_size", 46)
+	q.add_theme_color_override("font_color", Color(1.0, 0.9, 0.45))
+	q.add_theme_color_override("font_outline_color", Color(0.25, 0.1, 0.05))
+	q.add_theme_constant_override("outline_size", 10)
+	q.text = "ОТ КОГО БУДЕШЬ УБЕГАТЬ?"
+	choice_root.add_child(q)
+	var sub := Label.new()
+	sub.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	sub.offset_top = vp.y * 0.18 + 70
+	sub.offset_bottom = vp.y * 0.18 + 100
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", 20)
+	sub.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	sub.text = "Загрузи фото друга — пусть он гоняется за тобой!"
+	choice_root.add_child(sub)
+	var bfriend := Button.new()
+	bfriend.text = "Загрузить фото друга"
+	bfriend.size = Vector2(340, 66)
+	bfriend.position = Vector2(vp.x * 0.5 - 170, vp.y * 0.42)
+	_style_button(bfriend, Color(0.30, 0.52, 0.80), 24)
+	bfriend.pressed.connect(_pick_photo)
+	choice_root.add_child(bfriend)
+	var bdefault := Button.new()
+	bdefault.text = "Оставить %s" % CC.NAME_GEN
+	bdefault.size = Vector2(340, 58)
+	bdefault.position = Vector2(vp.x * 0.5 - 170, vp.y * 0.42 + 80)
+	_style_button(bdefault, Color(0.24, 0.60, 0.34), 21)
+	bdefault.pressed.connect(func():
+		photo_chosen = true
+		_save_game()
+		choice_root.visible = false
+		if title_root != null:
+			title_root.visible = true
+	)
+	choice_root.add_child(bdefault)
+	# превью стандартного персонажа справа (кого оставляешь)
+	if ResourceLoader.exists(CC.BILLBOARD_TEX):
+		var prev := TextureRect.new()
+		prev.texture = load(CC.BILLBOARD_TEX)
+		prev.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		prev.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+		prev.size = Vector2(130, 414)
+		prev.position = Vector2(vp.x * 0.79, vp.y * 0.28)
+		prev.modulate = Color(0.9, 0.9, 0.95)
+		choice_root.add_child(prev)
 
 func _start_game() -> void:
 	if title_root != null:
