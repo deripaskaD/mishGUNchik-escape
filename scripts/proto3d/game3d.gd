@@ -239,7 +239,8 @@ var face_zoom := 1.0          # масштаб фото на кубе
 var col_body := Color(0.90, 0.90, 0.94)
 var col_legs := Color(0.20, 0.18, 0.24)
 var hat_id := 0               # 0 нет · 1 кепка · 2 шляпа · 3 корона
-var face_mat: StandardMaterial3D   # общий материал лица (мир + превью)
+var face_mat: StandardMaterial3D   # материал фронта (лицо)
+var face_mats: Array = []          # 6 материалов граней головы: [фронт, затылок, -X, +X, верх, низ] — обтяжка фото
 var legs_mat: StandardMaterial3D
 var skin_mat: StandardMaterial3D
 var hair_mat: StandardMaterial3D
@@ -2335,20 +2336,39 @@ func _ensure_shared_mats() -> void:
 	if hair_mat == null:
 		hair_mat = _mat(Color(0.24, 0.17, 0.12))   # куб-«волосы» (виден сквозь прозрачные части фото)
 	if face_mat == null:
-		face_mat = StandardMaterial3D.new()
-		face_mat.albedo_texture = _photo_tex()
-		face_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		var tex := _photo_tex()
+		face_mats.clear()
+		for i in 6:
+			var m := StandardMaterial3D.new()
+			m.albedo_texture = tex
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+			face_mats.append(m)
+		face_mat = face_mats[0]
 		_apply_face_uv()
 
 func _apply_face_uv() -> void:
-	# регион фото на кубе: базовый регион лица + пользовательский сдвиг/масштаб (кастомизация)
-	if face_mat == null:
+	# «обтяжка» головы фотографией (стиль PTTR): фронт = лицо; бока = растянутые краевые полосы (уши);
+	# верх = волосы; затылок = растянутая линия волос; низ = подбородок/шея
+	if face_mats.size() < 6:
 		return
 	var r := _photo_face_region()
 	var c := r.position + r.size * 0.5 + Vector2(face_dx, face_dy) * r.size
 	var sz := r.size / face_zoom
-	face_mat.uv1_offset = Vector3(c.x - sz.x * 0.5, c.y - sz.y * 0.5, 0)
-	face_mat.uv1_scale = Vector3(sz.x, sz.y, 1)
+	var ox := c.x - sz.x * 0.5
+	var oy := c.y - sz.y * 0.5
+	var regs := [
+		Rect2(ox, oy, sz.x, sz.y),                                  # 0 фронт: лицо целиком
+		Rect2(ox, oy, sz.x, sz.y * 0.07),                           # 1 затылок: растянутая линия волос
+		Rect2(ox + sz.x * 0.90, oy, sz.x * 0.10, sz.y),             # 2 грань -X: правый край фото (ухо)
+		Rect2(ox, oy, sz.x * 0.10, sz.y),                           # 3 грань +X: левый край фото (ухо)
+		Rect2(ox, oy, sz.x, sz.y * 0.10),                           # 4 верх: волосы
+		Rect2(ox, oy + sz.y * 0.92, sz.x, sz.y * 0.08),             # 5 низ: подбородок/шея
+	]
+	for i in 6:
+		var m: StandardMaterial3D = face_mats[i]
+		var rg: Rect2 = regs[i]
+		m.uv1_offset = Vector3(rg.position.x, rg.position.y, 0)
+		m.uv1_scale = Vector3(rg.size.x, rg.size.y, 1)
 
 func _make_blocky_figure(root: Node3D, legs_out: Array, arms_out: Array) -> MeshInstance3D:
 	# блочный аватар (роблокс): ноги/торс/руки + куб-голова, ОБТЯНУТАЯ фото со всех 6 граней. Возвращает голову.
@@ -2393,8 +2413,8 @@ func _make_blocky_figure(root: Node3D, legs_out: Array, arms_out: Array) -> Mesh
 	head.position = Vector3(0, 1.42, 0)
 	head.material_override = hair_mat
 	root.add_child(head)
-	if face_mat.albedo_texture != null:
-		# фото обтягивает ВЕСЬ куб: 6 квадов по граням (BoxMesh-атлас порезал бы фото на куски)
+	if (face_mats[0] as StandardMaterial3D).albedo_texture != null:
+		# обтяжка: 6 квадов, у каждого СВОЙ участок фото (лицо/затылок/уши/волосы/шея)
 		var qm := QuadMesh.new()
 		qm.size = Vector2(0.68, 0.68)
 		var sides := [
@@ -2405,12 +2425,12 @@ func _make_blocky_figure(root: Node3D, legs_out: Array, arms_out: Array) -> Mesh
 			[Vector3(0, 0.341, 0), Vector3(-PI * 0.5, 0, 0)],
 			[Vector3(0, -0.341, 0), Vector3(PI * 0.5, 0, 0)],
 		]
-		for sd in sides:
+		for i in sides.size():
 			var q := MeshInstance3D.new()
 			q.mesh = qm
-			q.position = sd[0]
-			q.rotation = sd[1]
-			q.material_override = face_mat
+			q.position = sides[i][0]
+			q.rotation = sides[i][1]
+			q.material_override = face_mats[i]
 			head.add_child(q)
 	_build_hat(head)
 	return head
