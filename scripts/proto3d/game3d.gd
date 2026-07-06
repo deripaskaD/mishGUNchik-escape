@@ -155,6 +155,8 @@ var quest_panel: Label
 var quest_prompt: Label
 var qp_bg: ColorRect
 var qp_fill: ColorRect
+var qring: Control        # круговое кольцо прогресса квеста вокруг прицела
+var qring_prog := 0.0
 var crosshair: ColorRect
 var tutorial_label: Label
 var _tut_t := 9.0
@@ -2355,7 +2357,7 @@ func _make_timokha() -> void:
 		hcube.size = Vector3(0.68, 0.68, 0.68)
 		head.mesh = hcube
 		head.position = Vector3(0, 1.42, 0)
-		head.material_override = skin
+		head.material_override = _mat(Color(0.24, 0.17, 0.12))   # куб = «волосы» вокруг лица (стиль PTTR)
 		timokha.add_child(head)
 		var ptex := _photo_tex()
 		if ptex != null:
@@ -2369,7 +2371,7 @@ func _make_timokha() -> void:
 			fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 			var face := MeshInstance3D.new()
 			var qm := QuadMesh.new()
-			qm.size = Vector2(0.6, 0.6)
+			qm.size = Vector2(0.68, 0.68)   # лицо во всю грань куба (референс Paint the Town Red)
 			face.mesh = qm
 			face.position = Vector3(0, 1.42, -0.346)   # чуть перед гранью (фронт фигуры = -Z)
 			face.rotation.y = PI
@@ -2812,6 +2814,13 @@ void fragment() {
 	qp_fill.size = Vector2(0, 12)
 	qp_fill.visible = false
 	layer.add_child(qp_fill)
+	# круговое кольцо прогресса вокруг прицела (рисуется в _draw_qring, пульсирует при заполнении)
+	qring = Control.new()
+	qring.position = Vector2(vp.x * 0.5, vp.y * 0.5)
+	qring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	qring.visible = false
+	qring.draw.connect(_draw_qring)
+	layer.add_child(qring)
 	# стартовая подсказка-туториал (первые ~9 с, текст ставится в _ready по show_touch)
 	tutorial_label = Label.new()
 	tutorial_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -3827,6 +3836,8 @@ func _process(delta: float) -> void:
 		if _tut_t <= 0.0:
 			tutorial_label.visible = false
 	_update_compass()   # стрелка крутится каждый кадр — плавно (не как текст HUD на троттлинге)
+	if qring != null and qring.visible:
+		qring.queue_redraw()   # кольцо прогресса тоже плавное на мобиле
 	_hud_acc += delta
 	if (not _mobile) or _hud_acc >= 0.1:   # телефон: HUD/радар 10 Гц вместо 60 (строки+StyleBox каждый кадр — дорого)
 		_hud_acc = 0.0
@@ -4250,6 +4261,17 @@ func _set_crosshair_size(s: float) -> void:
 	crosshair.offset_right = h
 	crosshair.offset_bottom = h
 
+func _draw_qring() -> void:
+	# анимированное кольцо: тёмная подложка + дуга жёлтый→зелёный с бегущей «искрой» на конце
+	var r := 30.0 + sin(clock * 8.0) * 1.6
+	qring.draw_arc(Vector2.ZERO, r, 0, TAU, 48, Color(0, 0, 0, 0.45), 7.0, true)
+	if qring_prog > 0.005:
+		var col := Color(1.0, 0.85, 0.25).lerp(Color(0.35, 0.95, 0.45), qring_prog)
+		var a0 := -PI * 0.5
+		var a1 := a0 + TAU * qring_prog
+		qring.draw_arc(Vector2.ZERO, r, a0, a1, 48, col, 7.0, true)
+		qring.draw_circle(Vector2(cos(a1), sin(a1)) * r, 5.0, Color(1, 1, 1, 0.95))   # искра на фронте дуги
+
 func _update_quest_prompt() -> void:
 	if quest_prompt == null:
 		return
@@ -4276,12 +4298,11 @@ func _update_quest_prompt() -> void:
 			_set_crosshair_size(5.0)
 	if near_q == null or won:
 		quest_prompt.visible = false
-		qp_bg.visible = false
-		qp_fill.visible = false
+		if qring != null:
+			qring.visible = false
+			qring_prog = 0.0
 		return
 	quest_prompt.visible = true
-	qp_bg.visible = true
-	qp_fill.visible = true
 	var blocked := ""
 	if near_q["kind"] == "brew" and (wood < 2 or herbs < 2):
 		blocked = "нужно 2 дрова + 2 травы"
@@ -4290,11 +4311,16 @@ func _update_quest_prompt() -> void:
 	if blocked != "":
 		quest_prompt.text = "%s — %s" % [str(near_q["label"]), blocked]
 		quest_prompt.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
-		qp_fill.size.x = 0.0
+		if qring != null:
+			qring.visible = false
+			qring_prog = 0.0
 	else:
 		quest_prompt.text = str(near_q["label"])
 		quest_prompt.add_theme_color_override("font_color", Color(0.85, 1.0, 0.85))
-		qp_fill.size.x = 220.0 * clampf(float(near_q["prog"]), 0.0, 1.0)
+		if qring != null:
+			qring_prog = clampf(float(near_q["prog"]), 0.0, 1.0)
+			qring.visible = true
+			qring.queue_redraw()   # анимация кольца (пульс+дуга+искра) каждый кадр
 
 func _check_catch() -> void:
 	if stun > 0.0 or wake > 0.0 or not (_is_night() or final_chase):
