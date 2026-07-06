@@ -334,8 +334,19 @@ var _dbg_clip := ""   # форс-проигрывание клипа для пр
 var _mobile := false   # лёгкая графика (телефон ИЛИ ручной lowgfx)
 var _device_mobile := false   # реально телефон (тач-UI); НЕ форсится настройкой графики
 
+var _diag: Array = []   # веб-диагностика: ?diag=nosky,nowater,nofauna,... в URL
+
+func _has_diag(k: String) -> bool:
+	return _diag.has(k)
+
 func _ready() -> void:
 	var args := OS.get_cmdline_args() + OS.get_cmdline_user_args()
+	if OS.has_feature("web"):
+		var q := str(JavaScriptBridge.eval("window.location.search", true))
+		var m := q.find("diag=")
+		if m >= 0:
+			_diag = q.substr(m + 5).split(",")
+			print("[diag] ", _diag)
 	_shot = "--shot" in args
 	_shotin = "--shotin" in args
 	_autoplay = "--autoplay" in args
@@ -371,6 +382,13 @@ func _ready() -> void:
 		get_viewport().scaling_3d_scale = 0.8   # веб (WASM+WebGL) медленнее натива
 	_build_materials()
 	_build_environment()
+	if _has_diag("nosky"):
+		env.background_mode = Environment.BG_COLOR
+		env.background_color = Color(0.5, 0.7, 0.95)
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		env.ambient_light_color = Color(0.7, 0.75, 0.8)
+	if _has_diag("nofog"):
+		env.fog_enabled = false
 	_build_ground()
 	_build_cabin()
 	_build_structures()
@@ -1006,7 +1024,13 @@ func _build_ground() -> void:
 	mesh.material_override = m_ground
 	body.add_child(mesh)
 	var cs := CollisionShape3D.new()
-	cs.shape = am2.create_trimesh_shape()   # физика совпадает с рельефом
+	if _has_diag("flatcol"):
+		var bs0 := BoxShape3D.new()
+		bs0.size = Vector3(WORLD * 3.0, 1.0, WORLD * 3.0)
+		cs.shape = bs0
+		cs.position = Vector3(0, -0.5, 0)
+	else:
+		cs.shape = am2.create_trimesh_shape()   # физика совпадает с рельефом
 	body.add_child(cs)
 	add_child(body)
 	# невидимые стены по периметру игровой зоны — нельзя уйти за край/упасть
@@ -1224,6 +1248,8 @@ func _build_cabin() -> void:
 			_batch_scene(_kit("fence"), Transform3D(Basis.from_scale(Vector3.ONE * 1.5), Vector3(fx2, 0, fz)))
 
 func _smoke(pos: Vector3, amount: int, lifetime: float, gravity: Vector3, smin: float, smax: float, mesh_r: float, spread: float, vmin: float, vmax: float) -> void:
+	if _has_diag("nopart"):
+		return
 	var sm := CPUParticles3D.new()
 	sm.position = pos
 	sm.amount = amount
@@ -1809,7 +1835,7 @@ func _furn(nm: String, pos: Vector3, sc: float, rot: float = 0.0) -> bool:
 
 func _spawn_critters() -> void:
 	# живность «99 ночей»: олени и лисы бродят днём, убегают от игрока, ночью прячутся
-	if _autoplay:
+	if _autoplay or _has_diag("nofauna"):
 		return
 	var defs := [["Deer", 0.55], ["Deer", 0.6], ["Stag", 0.72], ["Fox", 0.42], ["Fox", 0.46]]
 	if _mobile or OS.has_feature("web"):
@@ -1837,7 +1863,7 @@ func _spawn_critters() -> void:
 
 func _spawn_bats() -> void:
 	# летучие мыши кружат ночью над жуткими точками (Quaternius Monster Pack, CC0)
-	if _autoplay or not ResourceLoader.exists("res://art/models/monster/Bat.fbx"):
+	if _autoplay or _has_diag("nofauna") or not ResourceLoader.exists("res://art/models/monster/Bat.fbx"):
 		return
 	var spots := [Vector3(-110, 7.0, -130), Vector3(-150, 5.5, 92), Vector3(-60, 6.5, -185)]
 	if _mobile or OS.has_feature("web"):
@@ -2384,6 +2410,11 @@ func _load_tree_scenes(leafy: bool) -> Array:
 
 func _tree(pos: Vector3, s: float, leafy: bool = false) -> void:
 	pos.y = _terrain_h(pos.x, pos.z)
+	if _has_diag("notreecol"):
+		var scenes0: Array = _tree_pine
+		if CC.BLOCKY and not n99_pine.is_empty():
+			_batch_scene(n99_pine[randi() % n99_pine.size()], _yrot_scale(pos, randf() * TAU, s))
+		return
 	var body := StaticBody3D.new()
 	body.position = pos
 	var scenes: Array = _tree_leafy if leafy else _tree_pine
@@ -2494,6 +2525,8 @@ func _rock_cluster(cx: float, cz: float, rng: RandomNumberGenerator) -> void:
 			_batch_scene(_rock_scenes[rng.randi() % _rock_scenes.size()], _yrot_scale(rp, rng.randf() * TAU, ms))
 
 func _build_water_and_yacht() -> void:
+	if _has_diag("nowater"):
+		return
 	var water := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(WORLD * 3.0, 340.0)
