@@ -26,6 +26,7 @@ if (typeof window === 'undefined') {
                 window.location.reload();
             };
             if (reg.active && !navigator.serviceWorker.controller) { doReload(); return; }
+            if (navigator.serviceWorker.controller && !window.crossOriginIsolated) { doReload(); return; }
             const w = reg.installing || reg.waiting;
             if (w) w.addEventListener('statechange', function () {
                 if (this.state === 'activated' && !navigator.serviceWorker.controller) doReload();
