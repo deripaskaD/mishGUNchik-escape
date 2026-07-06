@@ -1,5 +1,4 @@
-/* coi-serviceworker: включает crossOriginIsolated на хостингах без COOP/COEP заголовков (GitHub Pages).
-   Схема известного приёма coi-serviceworker (MIT). Регистрирует SW, добавляет заголовки, перезагружает раз. */
+/* coi-serviceworker: включает crossOriginIsolated без COOP/COEP заголовков хостинга (GitHub Pages). */
 if (typeof window === 'undefined') {
     self.addEventListener('install', () => self.skipWaiting());
     self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
@@ -17,11 +16,19 @@ if (typeof window === 'undefined') {
 } else {
     (function () {
         if (window.crossOriginIsolated) return;
-        if (!window.isSecureContext) return;
-        navigator.serviceWorker.register(window.document.currentScript.src).then(function (reg) {
-            if (reg.active && !navigator.serviceWorker.controller) window.location.reload();
-            reg.addEventListener('updatefound', function () {
+        if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
+        const n = parseInt(sessionStorage.getItem('coi-reloads') || '0');
+        if (n > 2) { console.error('coi: reload loop guard'); return; }
+        const src = document.currentScript.src;
+        navigator.serviceWorker.register(src).then(function (reg) {
+            const doReload = function () {
+                sessionStorage.setItem('coi-reloads', String(n + 1));
                 window.location.reload();
+            };
+            if (reg.active && !navigator.serviceWorker.controller) { doReload(); return; }
+            const w = reg.installing || reg.waiting;
+            if (w) w.addEventListener('statechange', function () {
+                if (this.state === 'activated' && !navigator.serviceWorker.controller) doReload();
             });
         }, function (err) { console.error('coi-sw register failed', err); });
     })();
