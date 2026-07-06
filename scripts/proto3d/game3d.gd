@@ -146,7 +146,10 @@ var hb_herbs: Label
 var done_label: Label
 var done_t := 0.0
 var quest_card: Panel   # фон-карточка цели (фокус внимания)
-var compass_needle: Node2D   # вращающаяся стрелка-компас в карточке (плавно, не по четвертям)
+var compass_needle: Node2D
+var compass_angle := 0.0
+var compass_on := false
+var quest_mini: Label   # вращающаяся стрелка-компас в карточке (плавно, не по четвертям)
 var touch_root: Control   # контейнер тач-контролов (джойстик+кнопки) — прячем на финале
 var pause_btn: Button
 var catch_label: Label
@@ -363,7 +366,7 @@ func _ready() -> void:
 	if _mobile:
 		get_viewport().scaling_3d_scale = 0.7   # рендер 3D в 70% → крупный прирост FPS (ретина рендерит ×2-3)
 	elif OS.has_feature("web"):
-		get_viewport().scaling_3d_scale = 0.85  # веб (WASM+WebGL) медленнее натива — щадящий даунскейл
+		get_viewport().scaling_3d_scale = 0.8   # веб (WASM+WebGL) медленнее натива
 	_build_materials()
 	_build_environment()
 	_build_ground()
@@ -875,7 +878,7 @@ func _build_environment() -> void:
 	sun.light_color = Color(1.0, 0.92, 0.76)   # тёплое золотое солнце (лес «99 ночей»)
 	sun.shadow_enabled = not _mobile   # на телефоне тени выключены (тяжело)
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL   # 1 сплит: нет мерцания на границах сплитов
-	sun.directional_shadow_max_distance = 45.0   # короче дистанция = плотнее тексели → нет дрожи вблизи
+	sun.directional_shadow_max_distance = 32.0 if OS.has_feature("web") else 45.0   # web: меньше кастеров в шэдоумапу
 	sun.shadow_blur = 2.8                          # мягче края (скрывает остаточный шиммер)
 	sun.shadow_bias = 0.06
 	sun.shadow_normal_bias = 3.0
@@ -889,7 +892,7 @@ func _build_environment() -> void:
 	moon.light_angular_distance = 5.0   # крупный диск = луна
 	moon.shadow_enabled = false          # включается ночью в _day_night (лунные тени деревьев)
 	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	moon.directional_shadow_max_distance = 45.0
+	moon.directional_shadow_max_distance = 32.0 if OS.has_feature("web") else 45.0
 	moon.shadow_blur = 2.8
 	moon.shadow_bias = 0.06
 	moon.shadow_normal_bias = 3.0
@@ -1044,20 +1047,29 @@ func _kit(name: String) -> PackedScene:
 	return load("res://art/models/town/%s.glb" % name)
 
 func _kit_house(pos: Vector3, variant: int) -> void:
-	# дом из Fantasy Town Kit (CC0). Пропорции ОТ ДВЕРИ: дыра проёма в модуле 0.75×0.4 юнита,
-	# при SC=2.8 дверь 2.1×1.12 м (в рост), окно 0.7..1.96 м (подоконник по пояс). Один пояс, 3×3 тайла (8.4 м).
-	var SC := 2.8
+	# дом из Fantasy Town Kit (CC0). Масштаб от ДЫРЫ ДВЕРИ (0.75×0.4 юнита): SC=3.0 → дверь 2.25×1.2 м.
+	# Фронт дома выбирается ПО НАПРАВЛЕНИЮ ТРОПЫ (тропы идут от избы) — дверь всегда встречает игрока.
+	var SC := 3.0
 	var wood := variant % 2 == 0
 	var wall_n := "wall-wood" if wood else "wall"
 	var win_n := "wall-wood-window-shutters" if wood else "wall-window-shutters"
 	var door_n := "wall-wood-doorway-square" if wood else "wall-doorway-square"
-	var half := 4.2
+	var half := 4.5
 	var sides := [
 		[Vector3(1, 0, 0), 0.0],
 		[Vector3(-1, 0, 0), PI],
 		[Vector3(0, 0, 1), -PI * 0.5],
 		[Vector3(0, 0, -1), PI * 0.5],
 	]
+	# фронт = сторона, ближайшая к направлению на избу (0,0)
+	var to_center := Vector3(-pos.x, 0, -pos.z).normalized()
+	var front_si := 0
+	var best := -2.0
+	for si in sides.size():
+		var d0 := (sides[si][0] as Vector3).dot(to_center)
+		if d0 > best:
+			best = d0
+			front_si = si
 	for si in sides.size():
 		var axis: Vector3 = sides[si][0]
 		var rot: float = sides[si][1]
@@ -1065,26 +1077,36 @@ func _kit_house(pos: Vector3, variant: int) -> void:
 		for i in 3:
 			var t := (float(i) - 1.0) * SC
 			var nm := wall_n
-			if si == 2 and i == 1:
-				nm = door_n                            # фронт: дверь в рост по центру
-			elif si == 2 or (si < 2 and i == 1) or (si == 3 and i != 1):
-				nm = win_n                             # окна: фронт по бокам двери, бока центр, зад края
+			if si == front_si and i == 1:
+				nm = door_n                            # дверь в рост по центру фронта
+			elif si == front_si or i == 1:
+				nm = win_n                             # окна: фронт по бокам двери + центр остальных
 			var origin := pos + axis * (half - 0.45 * SC) + lat * t
 			_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin), m_plaster if nm == "wall" else null)
-	# пол + цельная крыша + труба + фонарь у входа
+	# пол + цельная крыша + труба + фонарь и тёплый свет
 	_box(self, pos + Vector3(0, 0.06, 0), Vector3(half * 2.0, 0.14, half * 2.0), m_floor, false)
-	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(8.4, 4.4, 8.7)), pos + Vector3(0, SC, 0)), m_roof)
-	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * 1.9), pos + Vector3(1.8, SC + 1.0, -1.6)))
-	_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.5), pos + Vector3(2.6, 0, half + 0.5)))
-	hut_lights.append(_add_light(pos + Vector3(0, 2.3, -0.5), Color(1.0, 0.82, 0.55), 0.0, 6.0))   # тёплый свет ночью
+	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(9.0, 4.7, 9.35)), pos + Vector3(0, SC, 0)), m_roof)
+	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * 2.0), pos + Vector3(2.0, SC + 1.1, -1.7)))
+	var fr_axis := sides[front_si][0] as Vector3
+	var fr_lat := Vector3(0, 0, 1) if absf(fr_axis.x) > 0.5 else Vector3(1, 0, 0)
+	_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.5), pos + fr_axis * (half + 0.5) + fr_lat * 2.6))
+	hut_lights.append(_add_light(pos + Vector3(0, 2.4, 0), Color(1.0, 0.82, 0.55), 0.0, 6.0))
+	_house_col_facing(pos, half, SC, fr_axis)
 
-func _house_col(pos: Vector3) -> void:
-	# коллизии кит-дома 8.4×8.4×2.8: глухие стены + фронт с дверным проёмом 1.3 м
-	_wall_col(pos + Vector3(0, 1.4, -4.2), Vector3(8.7, 2.8, 0.3))
-	_wall_col(pos + Vector3(-4.2, 1.4, 0), Vector3(0.3, 2.8, 8.7))
-	_wall_col(pos + Vector3(4.2, 1.4, 0), Vector3(0.3, 2.8, 8.7))
-	for sx in [-2.45, 2.45]:
-		_wall_col(pos + Vector3(sx, 1.4, 4.2), Vector3(3.6, 2.8, 0.3))
+func _house_col_facing(pos: Vector3, half: float, hgt: float, front: Vector3) -> void:
+	# коллизии кит-дома: 3 глухие стены + фронт с дверным проёмом 1.4 м по центру
+	var lat := Vector3(0, 0, 1) if absf(front.x) > 0.5 else Vector3(1, 0, 0)
+	var along_lat := lat * (half * 2.0 + 0.3) + front * 0.3
+	var along_front := front * (half * 2.0 + 0.3) + lat * 0.3
+	var sz_lat := Vector3(absf(along_lat.x), hgt, absf(along_lat.z))
+	var sz_front := Vector3(absf(along_front.x), hgt, absf(along_front.z))
+	_wall_col(pos - front * half + Vector3(0, hgt * 0.5, 0), sz_lat)          # задняя
+	for sl in [-1.0, 1.0]:
+		_wall_col(pos + lat * (half * sl) + Vector3(0, hgt * 0.5, 0), sz_front)   # боковые
+	var seg := lat * 3.8 + front * 0.3
+	var sz_seg := Vector3(absf(seg.x), hgt, absf(seg.z))
+	for so in [-1.0, 1.0]:
+		_wall_col(pos + front * half + lat * (2.6 * so) + Vector3(0, hgt * 0.5, 0), sz_seg)   # фронт, проём 1.4
 
 func _wall_col(pos: Vector3, size: Vector3) -> void:
 	var b := StaticBody3D.new()
@@ -1326,7 +1348,6 @@ func _build_structures() -> void:
 	for h in HUTS:
 		_ground_shadow(h, 4.3)
 		_kit_house(h, i)      # модульный дом из Fantasy Town Kit (CC0)
-		_house_col(h)         # невидимые коллизии (визуал — кит)
 		_box(self, h + Vector3(0, 0.05, 0), Vector3(6, 0.15, 6), m_floor, false)   # пол
 		_hut_props(h, i)
 		i += 1
@@ -1781,9 +1802,9 @@ func _spawn_critters() -> void:
 	# живность «99 ночей»: олени и лисы бродят днём, убегают от игрока, ночью прячутся
 	if _autoplay:
 		return
-	var defs := [["Deer", 0.85], ["Deer", 0.9], ["Stag", 1.05], ["Fox", 0.65], ["Fox", 0.7]]
+	var defs := [["Deer", 0.55], ["Deer", 0.6], ["Stag", 0.72], ["Fox", 0.42], ["Fox", 0.46]]
 	if _mobile or OS.has_feature("web"):
-		defs = [["Deer", 0.9], ["Fox", 0.7]]
+		defs = [["Deer", 0.58], ["Fox", 0.44]]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 777
 	for d in defs:
@@ -1800,6 +1821,7 @@ func _spawn_critters() -> void:
 		add_child(inst)
 		var ap := inst.find_child("AnimationPlayer", true, false) as AnimationPlayer
 		if ap != null and ap.has_animation("Idle"):
+			ap.playback_default_blend_time = 0.35   # плавные переходы клипов
 			ap.play("Idle")
 		critters.append({"node": inst, "ap": ap, "st": "idle", "t": rng.randf_range(2.0, 5.0), "dir": Vector3.ZERO, "spd": 0.0})
 
@@ -1861,9 +1883,10 @@ func _update_critters(delta: float) -> void:
 			c["st"] = "flee"
 			c["t"] = 2.6
 			c["dir"] = -to_player.normalized()
-			c["spd"] = 5.2
+			c["spd"] = 4.6
 			var apf := c["ap"] as AnimationPlayer
 			if apf != null and apf.has_animation("Gallop"):
+				apf.speed_scale = 1.15
 				apf.play("Gallop")
 		if c["t"] <= 0.0:
 			var ap2 := c["ap"] as AnimationPlayer
@@ -1872,26 +1895,29 @@ func _update_critters(delta: float) -> void:
 				c["t"] = randf_range(2.5, 6.0)
 				c["spd"] = 0.0
 				if ap2 != null:
+					ap2.speed_scale = 1.0
 					ap2.play("Idle" if ap2.has_animation("Idle") else ap2.get_animation_list()[0])
 			else:
 				c["st"] = "walk"
 				c["t"] = randf_range(3.0, 7.0)
 				var a := randf() * TAU
 				c["dir"] = Vector3(cos(a), 0, sin(a))
-				c["spd"] = 1.3
+				c["spd"] = 1.1
 				if ap2 != null:
 					if ap2.has_animation("Walk"):
+						ap2.speed_scale = 1.0
 						ap2.play("Walk")
 					elif ap2.has_animation("Gallop"):
-						ap2.play("Gallop", -1, 0.45)
+						ap2.speed_scale = 0.5
+						ap2.play("Gallop")
 		if c["spd"] > 0.0:
 			var dirv := c["dir"] as Vector3
 			var np := n.position + dirv * (c["spd"] as float) * delta
 			np.x = clampf(np.x, -WORLD + 10.0, WORLD - 10.0)
 			np.z = clampf(np.z, -WORLD + 10.0, WORLD - 40.0)
-			np.y = _terrain_h(np.x, np.z)
+			np.y = lerpf(n.position.y, _terrain_h(np.x, np.z), clampf(delta * 8.0, 0.0, 1.0))
 			n.position = np
-			n.rotation.y = atan2(dirv.x, dirv.z)
+			n.rotation.y = lerp_angle(n.rotation.y, atan2(dirv.x, dirv.z), clampf(delta * 6.0, 0.0, 1.0))
 
 func _prop_model(nm: String, pos: Vector3, sc: float) -> bool:
 	# проп из Fantasy Props MegaKit (CC0); false = модели нет (фолбэк на примитив)
@@ -2060,7 +2086,8 @@ func _on_path(x: float, z: float) -> bool:
 func _build_forest() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260627
-	var n := 60 if _autoplay else (int(TREES / 3) if _mobile else TREES)   # блочный MultiMesh-лес дешёвый → мобиле снова густой (800)
+	var lite := _mobile or OS.has_feature("web")
+	var n := 60 if _autoplay else (int(TREES / 3) if _mobile else (int(TREES / 2) if lite else TREES))   # web: WebGL тянет меньше
 	var placed := 0
 	var attempts := 0
 	while placed < n and attempts < n * 4:
@@ -2159,7 +2186,7 @@ func _build_forest() -> void:
 		add_child(lt_inst)
 	# подлесок «99 ночей»: папоротники/трава/клевер (без коллизий, в батчах)
 	if not n99_ground.is_empty() and not _autoplay:
-		for i in (170 if _mobile else 520):
+		for i in (170 if _mobile else (280 if OS.has_feature("web") else 520)):
 			var gx := rng.randf_range(-WORLD + 5, WORLD - 5)
 			var gz := rng.randf_range(-WORLD + 5, WORLD - 5)
 			if Vector2(gx, gz).length() < CLEARING * 0.55 or (gz > WORLD - 42.0 and absf(gx) < 55.0) or _on_path(gx, gz):
@@ -2290,7 +2317,8 @@ func _batch_scene(ps: PackedScene, xform: Transform3D, recolor: Material = null)
 		_batch_mesh(e["mesh"], m, xform * (e["local"] as Transform3D))
 
 func _batch_mesh(mesh: Mesh, mat: Material, xform: Transform3D) -> void:
-	# батч по паре (меш, материал) — блочные детали с разными цветами не смешиваются
+	# батч по паре (меш, материал). Чанкование ПРОБОВАЛИ (150/240 м) — draw calls ×1.8
+	# из-за теневого прохода при том же FPS; для WebGL это хуже — откатили.
 	var key := "%d|%d" % [mesh.get_instance_id(), mat.get_instance_id() if mat != null else 0]
 	if not _mm_batches.has(key):
 		_mm_batches[key] = {"mesh": mesh, "override": mat, "xforms": []}
@@ -3374,18 +3402,12 @@ void fragment() {
 	quest_card.add_theme_stylebox_override("panel", qcs)
 	quest_card.size = Vector2(620, 54)
 	quest_card.position = Vector2(vp.x * 0.5 - 310, 56)
+	quest_card.visible = false   # верхняя карточка убрана: цель/компас живут у кольца прицела
 	quest_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(quest_card)
-	# стрелка-компас: круглая подложка + вращающаяся игла (обновляется каждый кадр в _process)
-	var rose := _round_panel(38.0, Color(0.06, 0.08, 0.13, 0.9))
-	rose.position = Vector2(vp.x * 0.5 - 260 + 8, 56 + 7)
-	layer.add_child(rose)
+	# старая игла-компас удалена: направление рисуется стрелкой на кольце прицела (_draw_qring)
 	compass_needle = Node2D.new()
-	compass_needle.position = Vector2(vp.x * 0.5 - 260 + 27, 56 + 26)
-	var tri := Polygon2D.new()
-	tri.polygon = PackedVector2Array([Vector2(0, -13), Vector2(8, 9), Vector2(0, 4), Vector2(-8, 9)])
-	tri.color = Color(1.0, 0.85, 0.25)
-	compass_needle.add_child(tri)
+	compass_needle.visible = false
 	layer.add_child(compass_needle)
 	quest_panel = Label.new()
 	quest_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -3397,6 +3419,7 @@ void fragment() {
 	quest_panel.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
 	quest_panel.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	quest_panel.add_theme_constant_override("outline_size", 4)
+	quest_panel.visible = false   # текст цели живёт в мини-строке у кольца
 	layer.add_child(quest_panel)
 	# подсказка-прогресс у прицела при подходе к квесту
 	quest_prompt = Label.new()
@@ -3430,6 +3453,19 @@ void fragment() {
 	qring.visible = false
 	qring.draw.connect(_draw_qring)
 	layer.add_child(qring)
+	# мини-строка цели под кольцом (замена верхней карточки)
+	quest_mini = Label.new()
+	quest_mini.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	quest_mini.offset_top = vp.y * 0.5 + 58
+	quest_mini.offset_bottom = vp.y * 0.5 + 88
+	quest_mini.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	quest_mini.add_theme_font_size_override("font_size", 17)
+	quest_mini.add_theme_color_override("font_color", Color(1.0, 0.92, 0.6))
+	quest_mini.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	quest_mini.add_theme_constant_override("outline_size", 6)
+	quest_mini.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	quest_mini.visible = false
+	layer.add_child(quest_mini)
 	# стартовая подсказка-туториал (первые ~9 с, текст ставится в _ready по show_touch)
 	tutorial_label = Label.new()
 	tutorial_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -3593,12 +3629,13 @@ void fragment() {
 	jtitle.text = "ДНЕВНИК ОСТРОВА"
 	journal_panel.add_child(jtitle)
 	var jscroll := ScrollContainer.new()
-	jscroll.position = Vector2(vp.x * 0.5 - 380, 90)
-	jscroll.size = Vector2(760, vp.y - 190)
+	var jw := minf(660.0, vp.x * 0.5)
+	jscroll.position = Vector2(vp.x * 0.5 - jw * 0.5, 96)
+	jscroll.size = Vector2(jw, vp.y - 250)
 	jscroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	journal_panel.add_child(jscroll)
 	journal_label = Label.new()
-	journal_label.custom_minimum_size = Vector2(760, 0)
+	journal_label.custom_minimum_size = Vector2(jw - 20.0, 0)
 	journal_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	journal_label.add_theme_font_size_override("font_size", 20)
 	journal_label.add_theme_color_override("font_color", Color(0.26, 0.17, 0.08) if jpaper else Color(0.88, 0.84, 0.76))
@@ -5136,6 +5173,14 @@ func _draw_qring() -> void:
 		var a1 := a0 + TAU * qring_prog
 		qring.draw_arc(Vector2.ZERO, r, a0, a1, 48, col, 7.0, true)
 		qring.draw_circle(Vector2(cos(a1), sin(a1)) * r, 5.0, Color(1, 1, 1, 0.95))   # искра на фронте дуги
+	if compass_on:
+		# компас: жёлтая стрелка бежит по орбите кольца, показывая направление на цель
+		var ca := compass_angle - PI * 0.5   # 0 = вверх
+		var op := Vector2(cos(ca), sin(ca)) * (r + 14.0)
+		var tip := op + Vector2(cos(ca), sin(ca)) * 9.0
+		var bl := op + Vector2(cos(ca + 2.5), sin(ca + 2.5)) * 7.0
+		var br := op + Vector2(cos(ca - 2.5), sin(ca - 2.5)) * 7.0
+		qring.draw_colored_polygon(PackedVector2Array([tip, bl, br]), Color(1.0, 0.85, 0.25, 0.95))
 
 func _update_quest_prompt() -> void:
 	if quest_prompt == null:
@@ -5334,7 +5379,7 @@ func _hide_gameplay_hud() -> void:
 
 func _show_gameplay_hud() -> void:
 	# вернуть игровой HUD (после воскрешения)
-	for n in [hud, radar, touch_root, pause_btn, quest_card, quest_panel, crosshair, lives_label]:
+	for n in [hud, radar, touch_root, pause_btn, crosshair, lives_label]:
 		if n != null:
 			n.visible = true
 	if hb_wood != null and hb_wood.get_parent() is CanvasItem:
@@ -5346,12 +5391,16 @@ func _update_compass() -> void:
 	if compass_needle == null or player == null:
 		return
 	var show := not (won or lost or paused) and (title_root == null or not title_root.visible)
-	compass_needle.visible = show
+	compass_needle.visible = false   # игла в карточке скрыта: компас рисуется на кольце
+	compass_on = false
 	if not show:
+		if quest_mini != null:
+			quest_mini.visible = false
 		return
 	var tq := _nearest_target()
 	if tq.is_empty():
-		compass_needle.visible = false
+		if quest_mini != null:
+			quest_mini.visible = false
 		return
 	var d3: Vector3 = (tq["pos"] as Vector3) - player.global_position
 	var dn := Vector2(d3.x, d3.z)
@@ -5363,6 +5412,12 @@ func _update_compass() -> void:
 	var fdot := fwd.x * dn.x + fwd.z * dn.y
 	var sdot := rgt.x * dn.x + rgt.z * dn.y
 	compass_needle.rotation = atan2(sdot, fdot)   # 0 = цель прямо по курсу (стрелка вверх)
+	compass_angle = compass_needle.rotation
+	compass_on = true
+	if quest_mini != null:
+		var dm := int(d3.length())
+		quest_mini.text = "%s · %d м" % [tq["label"], dm] if dm > 4 else str(tq["label"])
+		quest_mini.visible = show
 
 func _refresh_hud() -> void:
 	if hud == null:
