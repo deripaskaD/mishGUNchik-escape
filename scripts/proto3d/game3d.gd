@@ -276,9 +276,9 @@ var m_log: StandardMaterial3D
 var m_floor: StandardMaterial3D
 var m_rock: StandardMaterial3D
 var m_roof: StandardMaterial3D
+var m_plaster: StandardMaterial3D
 var m_path_blocky: StandardMaterial3D
-var _bm_gable: PrismMesh
-var m_gable: StandardMaterial3D
+var cabin_light: OmniLight3D   # тёплый свет избы (включается ночью)
 
 var pitch := 0.0
 var stun := 0.0
@@ -384,6 +384,10 @@ func _ready() -> void:
 		nights = 2
 		caught = 1
 		clock = 137.0   # 2:17 для проверки статистики на экране победы
+	if "--shotcabin" in args:
+		_shot = true
+		player.global_position = Vector3(11.5, 1.7, 11.5)
+		player.rotate_y(PI * 0.25)   # взгляд на угол избы (проверка кит-сборки)
 	if "--shotwell" in args:
 		_shot = true
 		player.global_position = Vector3(-170, 1.0, -39)   # смотрит на колодец у квеста «вода»
@@ -407,7 +411,8 @@ func _ready() -> void:
 		player.global_position = Vector3(-60, 1.0, -179)   # смотрит на лесной костёр у квеста «грибы»
 	if "--shotmill" in args:
 		_shot = true
-		player.global_position = Vector3(-110, 1.0, -107)   # смотрит на мельницу у квеста «дрова 2»
+		player.global_position = Vector3(-104, 1.6, -119)   # смотрит на мельницу у квеста «дрова 2»
+		player.rotate_y(PI * 0.15)
 	if "--shottower" in args:
 		_shot = true
 		player.global_position = Vector3(-135, 1.0, 169)   # смотрит на сторожевую вышку у квеста «забор»
@@ -663,6 +668,7 @@ void fragment() {
 	m_leaf2.set_shader_parameter("albedo", Color(0.34, 0.47, 0.17))
 	m_leaf2.set_shader_parameter("amount", 0.10)
 	m_log = _mat(Color(0.80, 0.58, 0.34) if CC.BLOCKY else Color(0.52, 0.38, 0.24))   # BLOCKY: светлое «роблокс»-дерево
+	m_plaster = _mat(Color(0.86, 0.80, 0.70))   # обход: вшитый материал wall.glb не рисуется в MultiMesh
 	m_roof = _mat(Color(0.82, 0.26, 0.20) if CC.BLOCKY else Color(0.40, 0.22, 0.16))  # сочно-красная крыша
 	if CC.BLOCKY:
 		# сочная роблокс-палитра: яркие кроны 4 оттенков, тёплый ствол, серые кубы-камни
@@ -933,26 +939,13 @@ func _kit_house(pos: Vector3, variant: int) -> void:
 					nm = glass_n                           # верхний пояс — окошки
 				# origin модуля: стена лежит на +X грани (смещение 0.45 юнита) → компенсируем
 				var origin := pos + axis * (3.0 - 0.45 * SC) + lat * t + Vector3(0, lvl * SC, 0)
-				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin))
-	# крыша: два ряда скатов с каждой стороны (вдоль Z) + конёк
-	for sx in [-1.0, 1.0]:
-		var rrot := 0.0 if sx > 0 else PI
-		for i in 4:
-			var tz := (float(i) - 1.5) * SC
-			_batch_scene(_kit("roof-gable"), Transform3D(Basis(Vector3.UP, rrot) * Basis.from_scale(Vector3.ONE * SC), pos + Vector3(sx * 2.2, 3.0, tz)))
-			_batch_scene(_kit("roof-gable"), Transform3D(Basis(Vector3.UP, rrot) * Basis.from_scale(Vector3.ONE * SC), pos + Vector3(sx * 0.75, 3.85, tz)))
-	for i in 4:
-		var tz2 := (float(i) - 1.5) * SC
-		_batch_scene(_kit("roof-gable-top"), Transform3D(Basis.from_scale(Vector3.ONE * SC), pos + Vector3(0, 4.72, tz2)))
-	# фронтоны: треугольные призмы закрывают торцы крыши (±Z)
-	if _bm_gable == null:
-		_bm_gable = PrismMesh.new()
-		_bm_gable.size = Vector3(6.05, 1.72, 0.18)
-		m_gable = _mat(Color(0.88, 0.80, 0.66))   # светлый фронтон под палитру кита
-	for gz in [-2.95, 2.95]:
-		_batch_mesh(_bm_gable, m_gable, Transform3D(Basis.IDENTITY, pos + Vector3(0, 3.86, gz)))
+				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin), m_plaster if nm == "wall" else null)
+	# крыша: roof-gable — ЦЕЛАЯ двускатная крыша (конёк по X, скаты по Z);
+	# один модуль на здание, неравномерный масштаб: длина/пролёт/высота
+	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(6.0, 3.5, 6.17)), pos + Vector3(0, 3.0, 0)), m_roof)
+	# торцы roof-gable закрыты в самом модуле — фронтоны не нужны
 	# труба + фонарь у двери
-	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * SC), pos + Vector3(1.6, 4.4, -1.5)))
+	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * SC), pos + Vector3(1.12, 3.5, -1.5)))
 	_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.2), pos + Vector3(1.8, 0, 3.4)))
 
 func _house_col(pos: Vector3) -> void:
@@ -1009,31 +1002,38 @@ func _build_cabin() -> void:
 	var half := 4.5
 	# пол (декор) + крыльцо
 	_box(self, Vector3(0, 0.05, 0), Vector3(half * 2, 0.2, half * 2), m_floor, false)
-	# задняя и боковые стены
-	_box(self, Vector3(0, H * 0.5, -half), Vector3(half * 2, H, 0.3), m_log, true)
-	_box(self, Vector3(-half, H * 0.5, 0), Vector3(0.3, H, half * 2), m_log, true)
-	_box(self, Vector3(half, H * 0.5, 0), Vector3(0.3, H, half * 2), m_log, true)
-	# передняя стена с дверным проёмом (две секции + перемычка)
-	var door := 1.8
+	# КОЛЛИЗИИ стен (невидимые) — визуал теперь модульный кит
+	_wall_col(Vector3(0, H * 0.5, -half), Vector3(half * 2, H, 0.3))
+	_wall_col(Vector3(-half, H * 0.5, 0), Vector3(0.3, H, half * 2))
+	_wall_col(Vector3(half, H * 0.5, 0), Vector3(0.3, H, half * 2))
+	var door := 3.0   # широкий проём (двойная кит-дверь по центру)
 	var seg := (half * 2 - door) * 0.5
-	_box(self, Vector3(-(door * 0.5 + seg * 0.5), H * 0.5, half), Vector3(seg, H, 0.3), m_log, true)
-	_box(self, Vector3((door * 0.5 + seg * 0.5), H * 0.5, half), Vector3(seg, H, 0.3), m_log, true)
-	_box(self, Vector3(0, H - 0.4, half), Vector3(door, 0.8, 0.3), m_log, true)
-	# крыша (двускатная имитация — наклонные боксы)
-	var roofL := MeshInstance3D.new()
-	var rb := BoxMesh.new()
-	rb.size = Vector3(half * 2 + 0.6, 0.25, half + 0.8)
-	roofL.mesh = rb
-	roofL.material_override = m_roof
-	roofL.position = Vector3(0, H + 1.0, -half * 0.5)
-	roofL.rotation_degrees = Vector3(-28, 0, 0)
-	add_child(roofL)
-	var roofR := MeshInstance3D.new()
-	roofR.mesh = rb
-	roofR.material_override = roofL.material_override
-	roofR.position = Vector3(0, H + 1.0, half * 0.5)
-	roofR.rotation_degrees = Vector3(28, 0, 0)
-	add_child(roofR)
+	_wall_col(Vector3(-(door * 0.5 + seg * 0.5), H * 0.5, half), Vector3(seg, H, 0.3))
+	_wall_col(Vector3((door * 0.5 + seg * 0.5), H * 0.5, half), Vector3(seg, H, 0.3))
+	# СТЕНЫ из Fantasy Town Kit: 6×6 тайлов (SC=1.5), 2 пояса, дверь-2 тайла по центру фронта
+	var SC := 1.5
+	var csides := [[Vector3(1, 0, 0), 0.0], [Vector3(-1, 0, 0), PI], [Vector3(0, 0, 1), PI * 0.5], [Vector3(0, 0, -1), -PI * 0.5]]
+	for si in csides.size():
+		var axis: Vector3 = csides[si][0]
+		var rot: float = csides[si][1]
+		var lat := Vector3(0, 0, 1) if absf(axis.x) > 0.5 else Vector3(1, 0, 0)
+		for i in 6:
+			var t := (float(i) - 2.5) * SC
+			for lvl in 2:
+				var nm := "wall-wood"
+				if si == 2 and lvl == 0 and (i == 2 or i == 3):
+					nm = "wall-wood-doorway-square"
+				elif lvl == 0 and (i == 0 or i == 5):
+					nm = "wall-wood-window-shutters"
+				elif lvl == 1 and (i == 2 or i == 3):
+					nm = "wall-wood-window-glass"
+				var origin := Vector3(0, 0, 0) + axis * (half - 0.45 * SC) + lat * t + Vector3(0, lvl * SC, 0)
+				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin))
+	# КРЫША: один модуль roof-gable на всю избу (конёк вдоль X), фронтоны-призмы по ±X
+	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(8.9, 4.6, 9.16)), Vector3(0, 3.0, 0)), m_roof)
+
+	# тёплый свет внутри — ночью льётся из двери и окон
+	cabin_light = _add_light(Vector3(0, 2.2, 0), Color(1.0, 0.78, 0.45), 0.0, 7.5)
 	# интерьер: стол + котёл (квест варки)
 	_box(self, Vector3(2.4, 0.95, -2.6), Vector3(1.8, 0.12, 1.0), m_floor, false)
 	for c in [Vector3(-0.8, 0.47, -0.4), Vector3(0.8, 0.47, -0.4), Vector3(-0.8, 0.47, 0.4), Vector3(0.8, 0.47, 0.4)]:
@@ -1041,19 +1041,22 @@ func _build_cabin() -> void:
 	_cauldron(Vector3(-1.8, 0, -2.8))
 	# детали интерьера/экстерьера
 	_porch(half, H)
-	_window(Vector3(-half + 0.06, 1.7, -1.2))
-	_window(Vector3(half - 0.06, 1.7, 1.4))
 	_door_leaf(half, H)
 	_bed(Vector3(-3.0, 0, -3.2))
 	_corner_stove(Vector3(3.3, 0, -3.3))
 	# перегородка с проходом (намёк на вторую комнату)
 	_box(self, Vector3(1.4, H * 0.5, -3.0), Vector3(0.25, H, 2.6), m_log, true)
-	_house_trim(Vector3.ZERO, half * 2, half * 2, H, true)
-	# печная труба над углом с печью + дымок из неё
-	var brick := _mat(Color(0.46, 0.32, 0.26))
-	_box(self, Vector3(3.0, 4.5, -3.0), Vector3(0.7, 1.9, 0.7), brick, false)
-	_box(self, Vector3(3.0, 5.55, -3.0), Vector3(0.9, 0.25, 0.9), brick, false)   # навершие
-	_smoke(Vector3(3.0, 5.8, -3.0), 12, 3.6, Vector3(0.25, 0.4, 0.0), 0.4, 0.9, 0.3, 10.0, 0.4, 0.9)   # дым из трубы (снос ветром)
+	# труба из кита + дымок; фонари по бокам двери
+	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * 1.7), Vector3(2.46, 3.6, -2.2)))
+	_smoke(Vector3(3.0, 5.6, -2.2), 12, 3.6, Vector3(0.25, 0.4, 0.0), 0.4, 0.9, 0.3, 10.0, 0.4, 0.9)
+	for lx in [-2.4, 2.4]:
+		_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.3), Vector3(lx, 0, half + 0.6)))
+	# декоративный заборчик двора: фронт с проёмом у крыльца + короткие крылья (без коллизии)
+	for fx in [-6.75, -5.25, -3.75, -2.25, 2.25, 3.75, 5.25, 6.75]:
+		_batch_scene(_kit("fence"), Transform3D(Basis(Vector3.UP, PI * 0.5) * Basis.from_scale(Vector3.ONE * 1.5), Vector3(fx, 0, 7.85)))
+	for fz in [6.45, 4.95]:
+		for fx2 in [-8.175, 6.825]:
+			_batch_scene(_kit("fence"), Transform3D(Basis.from_scale(Vector3.ONE * 1.5), Vector3(fx2, 0, fz)))
 
 func _smoke(pos: Vector3, amount: int, lifetime: float, gravity: Vector3, smin: float, smax: float, mesh_r: float, spread: float, vmin: float, vmax: float) -> void:
 	var sm := CPUParticles3D.new()
@@ -1525,39 +1528,37 @@ func _watchtower(pos: Vector3) -> void:
 		_box(self, pos + Vector3(0, 0.6 + r * 0.65, 1.32), Vector3(0.9, 0.08, 0.08), wood, false)
 
 func _windmill(pos: Vector3) -> void:
-	# башня (сужающийся кверху цилиндр)
-	var tower := MeshInstance3D.new()
-	var tc := CylinderMesh.new()
-	tc.bottom_radius = 2.2
-	tc.top_radius = 1.4
-	tc.height = 7.0
-	tower.mesh = tc
-	tower.position = pos + Vector3(0, 3.5, 0)
-	tower.material_override = _mat(Color(0.5, 0.42, 0.32))
-	add_child(tower)
-	# коническая крыша
-	var roof := MeshInstance3D.new()
-	var rc := CylinderMesh.new()
-	rc.top_radius = 0.0
-	rc.bottom_radius = 1.7
-	rc.height = 1.8
-	roof.mesh = rc
-	roof.position = pos + Vector3(0, 7.9, 0)
-	roof.material_override = _mat(Color(0.4, 0.26, 0.16))
-	add_child(roof)
-	# дверь
-	_box(self, pos + Vector3(0, 1.05, 2.05), Vector3(1.0, 2.1, 0.2), _mat(Color(0.26, 0.18, 0.1)), false)
-	# крылья (вращаются в _process)
-	mill_blades = Node3D.new()
-	mill_blades.position = pos + Vector3(0, 5.6, 2.3)
+	# каменная башня из кита: 3×3 тайла (4.5 м), 4 пояса (6 м), пирамидальная крыша, ротор из кита
+	var SC := 1.5
+	var half := 2.25
+	var sides := [[Vector3(1, 0, 0), 0.0], [Vector3(-1, 0, 0), PI], [Vector3(0, 0, 1), PI * 0.5], [Vector3(0, 0, -1), -PI * 0.5]]
+	for si in sides.size():
+		var axis: Vector3 = sides[si][0]
+		var rot: float = sides[si][1]
+		var lat := Vector3(0, 0, 1) if absf(axis.x) > 0.5 else Vector3(1, 0, 0)
+		for i in 3:
+			var t := (float(i) - 1.0) * SC
+			for lvl in 4:
+				var nm := "wall"
+				if si == 2 and lvl == 0 and i == 1:
+					nm = "wall-doorway-square"    # вход (декор) с фронта
+				elif si == 2 and lvl == 2 and i == 1:
+					nm = "wall-window-shutters"   # окошко только на фронте (модуль сквозной)
+				var origin := pos + axis * (half - 0.45 * SC) + lat * t + Vector3(0, lvl * SC, 0)
+				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin), m_plaster if nm == "wall" else null)
+	# пирамидальная крыша + фонарь у входа
+	_batch_scene(_kit("roof-point"), Transform3D(Basis.from_scale(Vector3(4.45, 5.5, 4.45)), pos + Vector3(0, 6.0, 0)), m_roof)
+	_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.3), pos + Vector3(1.6, 0, half + 0.4)))
+	# коллизия башни (сплошной блок — внутрь не заходим)
+	_wall_col(pos + Vector3(0, 3.0, 0), Vector3(half * 2, 6.0, half * 2))
+	# ротор из кита (плоскость YZ, ось X) → разворачиваем осью на фронт (+Z), крутим в _process
+	mill_blades = (_kit("windmill").instantiate() as Node3D)
+	mill_blades.position = pos + Vector3(0, 6.2, half + 0.45)
+	mill_blades.rotate_y(-PI * 0.5)
+	mill_blades.scale = Vector3.ONE * 1.75
 	add_child(mill_blades)
-	_box(mill_blades, Vector3.ZERO, Vector3(0.45, 0.45, 0.5), _mat(Color(0.22, 0.15, 0.08)), false)
-	for i in 4:
-		var blade := Node3D.new()
-		blade.rotation_degrees = Vector3(0, 0, 90.0 * i)
-		mill_blades.add_child(blade)
-		_box(blade, Vector3(0, 1.75, 0), Vector3(0.55, 3.3, 0.06), _mat(Color(0.62, 0.52, 0.36)), false)
-		_box(blade, Vector3(0, 1.75, 0.02), Vector3(0.13, 3.4, 0.13), _mat(Color(0.3, 0.2, 0.12)), false)
+	# ось-втулка между ротором и стеной
+	_box(self, pos + Vector3(0, 6.2, half + 0.2), Vector3(0.42, 0.42, 0.6), _mat(Color(0.28, 0.19, 0.11)), false)
 
 func _campfire(pos: Vector3) -> void:
 	# GLB-костёр (камни + поленья); пламя/искры/дым/свет — ниже
@@ -1967,8 +1968,9 @@ func _mm_collect(n: Node, xf: Transform3D, acc: Array) -> void:
 	for c in n.get_children():
 		_mm_collect(c, xf, acc)
 
-func _batch_scene(ps: PackedScene, xform: Transform3D) -> void:
-	# вместо instantiate() на каждый объект — копим трансформы, рисуем одним MultiMesh на меш
+func _batch_scene(ps: PackedScene, xform: Transform3D, recolor: Material = null) -> void:
+	# вместо instantiate() на каждый объект — копим трансформы, рисуем одним MultiMesh на меш.
+	# recolor: заменить материал модуля (напр. сланцевые крыши кита → фирменный красный)
 	if not _mm_templates.has(ps):
 		var inst := ps.instantiate()
 		var acc: Array = []
@@ -1976,7 +1978,8 @@ func _batch_scene(ps: PackedScene, xform: Transform3D) -> void:
 		inst.free()
 		_mm_templates[ps] = acc
 	for e in _mm_templates[ps]:
-		_batch_mesh(e["mesh"], e["override"], xform * (e["local"] as Transform3D))
+		var m: Material = recolor if recolor != null else e["override"]
+		_batch_mesh(e["mesh"], m, xform * (e["local"] as Transform3D))
 
 func _batch_mesh(mesh: Mesh, mat: Material, xform: Transform3D) -> void:
 	# батч по паре (меш, материал) — блочные детали с разными цветами не смешиваются
@@ -1998,8 +2001,13 @@ func _flush_batches() -> void:
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.mesh = b["mesh"]
 		mm.instance_count = xfs.size()
+		var maabb: AABB = (b["mesh"] as Mesh).get_aabb()
+		var ab := AABB()
 		for i in xfs.size():
 			mm.set_instance_transform(i, xfs[i])
+			var ia: AABB = (xfs[i] as Transform3D) * maabb
+			ab = ia if i == 0 else ab.merge(ia)
+		mm.custom_aabb = ab.grow(0.5)   # иначе фрустум-куллинг режет батч по AABB меша у origin
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
 		if b["override"] != null:
@@ -2635,7 +2643,7 @@ func _build_quests() -> void:
 	_add_quest("apples", Vector3(-42, 0, 120), "Собери яблоки", "task")
 	_add_quest("banya", Vector3(176, 0, 28), "Затопи баню", "task")
 	_add_quest("bones", Vector3(-150, 0, 92), "Похорони кости", "task")
-	_add_quest("brew", Vector3(-1.8, 0, -2.8), "Свари варево (2 дрова + 2 травы)", "brew")
+	_add_quest("brew", Vector3(-1.8, 0, -2.8), "Свари варево", "brew")
 	_add_quest("yacht", Vector3(8, 0, WORLD - 15.0), "Почини яхту — побег!", "yacht")
 	# пропсы у точек
 	_woodpile(Vector3(72, 0, -66))
@@ -2988,8 +2996,8 @@ void fragment() {
 	qcs.set_border_width_all(2)
 	qcs.set_corner_radius_all(12)
 	quest_card.add_theme_stylebox_override("panel", qcs)
-	quest_card.size = Vector2(520, 52)
-	quest_card.position = Vector2(vp.x * 0.5 - 260, 56)
+	quest_card.size = Vector2(620, 54)
+	quest_card.position = Vector2(vp.x * 0.5 - 310, 56)
 	quest_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(quest_card)
 	# стрелка-компас: круглая подложка + вращающаяся игла (обновляется каждый кадр в _process)
@@ -3009,7 +3017,7 @@ void fragment() {
 	quest_panel.offset_bottom = 106
 	quest_panel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	quest_panel.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	quest_panel.add_theme_font_size_override("font_size", 19)
+	quest_panel.add_theme_font_size_override("font_size", 18)
 	quest_panel.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
 	quest_panel.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	quest_panel.add_theme_constant_override("outline_size", 4)
@@ -4211,8 +4219,8 @@ func _process(delta: float) -> void:
 			cam.position = Vector3(bx, 0.7 + by, 0)
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
-	if mill_blades != null:   # вращение крыльев мельницы
-		mill_blades.rotation.z += delta * 0.6
+	if mill_blades != null:   # вращение ротора мельницы вокруг своей оси
+		mill_blades.rotate_object_local(Vector3.RIGHT, delta * 0.6)
 	# молния + гром (редко, в дождь)
 	if light_flash != null:
 		if _light_v > 0.0:
@@ -4344,6 +4352,8 @@ func _day_night() -> void:
 		moon.visible = nf > 0.02
 		moon.light_energy = lerpf(0.0, 0.34, nf)
 		moon.shadow_enabled = (not _mobile) and nf > 0.5   # лунные тени деревьев (ночью пропадали — солнце гасло)
+	if cabin_light != null:                            # изба светится тёплым изнутри ночью (дверь/окна)
+		cabin_light.light_energy = lerpf(0.0, 1.7, nf)
 	if flashlight != null:                             # фонарик-награда: горит ночью, гаснет на рассвете
 		if nf < 0.3:
 			flashlight_on = false
@@ -4976,6 +4986,9 @@ func _refresh_hud() -> void:
 			qp += "\n%s %d%%" % [_bar(cq["prog"]), int(cq["prog"] * 100.0)]
 	if quest_panel != null:
 		quest_panel.text = qp
+		if quest_card != null:
+			var lines := qp.count("\n") + 1
+			quest_card.size.y = 54.0 if lines <= 1 else 84.0
 
 func _current_quest() -> Dictionary:
 	var best := {}
