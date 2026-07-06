@@ -231,6 +231,23 @@ var win_label: Label
 var title_root: Control   # тайтл-экран (Играть/Графика/Дневник) — показывается на старте
 var custom_photo: Texture2D   # пользовательское фото персонажа (user://custom_photo.png)
 var choice_root: Control      # стартовый выбор: «фото друга» или стандартный персонаж
+# ── кастомизация персонажа (экран «Персонаж») ──
+var custom_root: Control
+var face_dx := 0.0            # сдвиг фото по кубу (доли региона)
+var face_dy := 0.0
+var face_zoom := 1.0          # масштаб фото на кубе
+var col_body := Color(0.90, 0.90, 0.94)
+var col_legs := Color(0.20, 0.18, 0.24)
+var hat_id := 0               # 0 нет · 1 кепка · 2 шляпа · 3 корона
+var face_mat: StandardMaterial3D   # общий материал лица (мир + превью)
+var legs_mat: StandardMaterial3D
+var skin_mat: StandardMaterial3D
+var hair_mat: StandardMaterial3D
+var world_head: MeshInstance3D
+var preview_head: MeshInstance3D
+var preview_fig: Node3D
+var hat_nodes: Array = []
+var hat_label: Label
 var photo_chosen := false     # выбор сделан (сохраняется) — экран показывается один раз
 var _js_photo_cb: JavaScriptObject   # держим ссылку (иначе GC на вебе)
 
@@ -348,6 +365,7 @@ func _ready() -> void:
 	_build_radar()
 	_build_title()
 	_build_choice()
+	_build_custom()
 	space = get_world_3d().direct_space_state
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # захват мыши — по кнопке «Играть» (решение о тайтле — в КОНЦЕ _ready, после разбора --shot* флагов)
 	if _shotin:
@@ -411,6 +429,11 @@ func _ready() -> void:
 		paused = true
 		if choice_root != null:
 			choice_root.visible = true
+	if "--shotcustom" in args:
+		_shot = true
+		paused = true
+		if custom_root != null:
+			custom_root.visible = true
 	if "--shottitle" in args:
 		_shot = true
 		paused = true
@@ -2221,11 +2244,166 @@ func _collect_meshes(n: Node) -> Array:
 		out += _collect_meshes(c)
 	return out
 
+func _ensure_shared_mats() -> void:
+	# общие материалы фигуры (мир + превью) — смена цвета применяется живьём везде
+	if legs_mat == null:
+		legs_mat = _mat(col_legs)
+	if skin_mat == null:
+		skin_mat = _mat(Color(0.85, 0.62, 0.46))
+	if hair_mat == null:
+		hair_mat = _mat(Color(0.24, 0.17, 0.12))   # куб-«волосы» (виден сквозь прозрачные части фото)
+	if face_mat == null:
+		face_mat = StandardMaterial3D.new()
+		face_mat.albedo_texture = _photo_tex()
+		face_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		_apply_face_uv()
+
+func _apply_face_uv() -> void:
+	# регион фото на кубе: базовый регион лица + пользовательский сдвиг/масштаб (кастомизация)
+	if face_mat == null:
+		return
+	var r := _photo_face_region()
+	var c := r.position + r.size * 0.5 + Vector2(face_dx, face_dy) * r.size
+	var sz := r.size / face_zoom
+	face_mat.uv1_offset = Vector3(c.x - sz.x * 0.5, c.y - sz.y * 0.5, 0)
+	face_mat.uv1_scale = Vector3(sz.x, sz.y, 1)
+
+func _make_blocky_figure(root: Node3D, legs_out: Array, arms_out: Array) -> MeshInstance3D:
+	# блочный аватар (роблокс): ноги/торс/руки + куб-голова, ОБТЯНУТАЯ фото со всех 6 граней. Возвращает голову.
+	_ensure_shared_mats()
+	if timokha_mat == null:
+		timokha_mat = _mat(col_body)
+	for sx in [-0.24, 0.24]:
+		var hip := Node3D.new()
+		hip.position = Vector3(sx, 0.0, 0)
+		root.add_child(hip)
+		var leg := MeshInstance3D.new()
+		var lb := BoxMesh.new()
+		lb.size = Vector3(0.38, 1.0, 0.42)
+		leg.mesh = lb
+		leg.position = Vector3(0, -0.5, 0)
+		leg.material_override = legs_mat
+		hip.add_child(leg)
+		legs_out.append(hip)
+	var torso := MeshInstance3D.new()
+	var tb := BoxMesh.new()
+	tb.size = Vector3(1.0, 1.0, 0.55)
+	torso.mesh = tb
+	torso.position = Vector3(0, 0.5, 0)
+	torso.material_override = timokha_mat
+	root.add_child(torso)
+	for sx in [-0.66, 0.66]:
+		var sh := Node3D.new()
+		sh.position = Vector3(sx, 0.88, 0)
+		root.add_child(sh)
+		var arm := MeshInstance3D.new()
+		var ab := BoxMesh.new()
+		ab.size = Vector3(0.3, 0.95, 0.32)
+		arm.mesh = ab
+		arm.position = Vector3(0, -0.44, 0)
+		arm.material_override = skin_mat
+		sh.add_child(arm)
+		arms_out.append(sh)
+	var head := MeshInstance3D.new()
+	var hcube := BoxMesh.new()
+	hcube.size = Vector3(0.68, 0.68, 0.68)
+	head.mesh = hcube
+	head.position = Vector3(0, 1.42, 0)
+	head.material_override = hair_mat
+	root.add_child(head)
+	if face_mat.albedo_texture != null:
+		# фото обтягивает ВЕСЬ куб: 6 квадов по граням (BoxMesh-атлас порезал бы фото на куски)
+		var qm := QuadMesh.new()
+		qm.size = Vector2(0.68, 0.68)
+		var sides := [
+			[Vector3(0, 0, -0.341), Vector3(0, PI, 0)],
+			[Vector3(0, 0, 0.341), Vector3(0, 0, 0)],
+			[Vector3(-0.341, 0, 0), Vector3(0, -PI * 0.5, 0)],
+			[Vector3(0.341, 0, 0), Vector3(0, PI * 0.5, 0)],
+			[Vector3(0, 0.341, 0), Vector3(-PI * 0.5, 0, 0)],
+			[Vector3(0, -0.341, 0), Vector3(PI * 0.5, 0, 0)],
+		]
+		for sd in sides:
+			var q := MeshInstance3D.new()
+			q.mesh = qm
+			q.position = sd[0]
+			q.rotation = sd[1]
+			q.material_override = face_mat
+			head.add_child(q)
+	_build_hat(head)
+	return head
+
+func _build_hat(head: MeshInstance3D) -> void:
+	# головной убор по hat_id (0 нет · 1 кепка · 2 шляпа · 3 корона) — блочный, крепится к голове
+	var hroot := Node3D.new()
+	hroot.name = "hat"
+	head.add_child(hroot)
+	hat_nodes.append(hroot)
+	match hat_id:
+		1:
+			var red := _mat(Color(0.85, 0.2, 0.16))
+			var top := MeshInstance3D.new()
+			var tb2 := BoxMesh.new()
+			tb2.size = Vector3(0.74, 0.16, 0.74)
+			top.mesh = tb2
+			top.position = Vector3(0, 0.42, 0)
+			top.material_override = red
+			hroot.add_child(top)
+			var peak := MeshInstance3D.new()
+			var pb := BoxMesh.new()
+			pb.size = Vector3(0.5, 0.06, 0.34)
+			peak.mesh = pb
+			peak.position = Vector3(0, 0.37, -0.5)
+			peak.material_override = red
+			hroot.add_child(peak)
+		2:
+			var dark := _mat(Color(0.16, 0.15, 0.18))
+			var brim := MeshInstance3D.new()
+			var bb := BoxMesh.new()
+			bb.size = Vector3(0.98, 0.06, 0.98)
+			brim.mesh = bb
+			brim.position = Vector3(0, 0.38, 0)
+			brim.material_override = dark
+			hroot.add_child(brim)
+			var crown := MeshInstance3D.new()
+			var cb := BoxMesh.new()
+			cb.size = Vector3(0.5, 0.42, 0.5)
+			crown.mesh = cb
+			crown.position = Vector3(0, 0.62, 0)
+			crown.material_override = dark
+			hroot.add_child(crown)
+		3:
+			var gold := _emissive_mat(Color(0.95, 0.78, 0.2), Color(0.9, 0.7, 0.2), 0.35)
+			var band := MeshInstance3D.new()
+			var gb := BoxMesh.new()
+			gb.size = Vector3(0.52, 0.16, 0.52)
+			band.mesh = gb
+			band.position = Vector3(0, 0.43, 0)
+			band.material_override = gold
+			hroot.add_child(band)
+			for corner in [Vector3(-0.19, 0.56, -0.19), Vector3(0.19, 0.56, -0.19), Vector3(-0.19, 0.56, 0.19), Vector3(0.19, 0.56, 0.19)]:
+				var spike := MeshInstance3D.new()
+				var sb := BoxMesh.new()
+				sb.size = Vector3(0.1, 0.16, 0.1)
+				spike.mesh = sb
+				spike.position = corner
+				spike.material_override = gold
+				hroot.add_child(spike)
+
+func _rebuild_hats() -> void:
+	for n in hat_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	hat_nodes.clear()
+	for h in [world_head, preview_head]:
+		if h != null and is_instance_valid(h):
+			_build_hat(h)
+
 func _make_timokha() -> void:
 	# человечек-примитив, СТОИТ НА ЗЕМЛЕ: origin на y=1.0, ступни на 0.
 	timokha = CharacterBody3D.new()
 	timokha.position = Vector3(0, 1.0, -4)
-	timokha_mat = _mat(CC.BODY_COLOR)
+	timokha_mat = _mat(col_body)
 	var pants := _mat(Color(0.20, 0.18, 0.24))
 	var skin := _mat(Color(0.85, 0.62, 0.46))
 	# тень-кружок под ногами (заземляет модель, помогает заметить угрозу)
@@ -2320,63 +2498,8 @@ func _make_timokha() -> void:
 		tk_sprite = spr
 		timokha.add_child(spr)
 	else:
-		# РОБЛОКС-ФИГУРА: блочное тело + куб-голова с фото-лицом decal (как аватар Roblox)
-		for sx in [-0.24, 0.24]:
-			var hip := Node3D.new()
-			hip.position = Vector3(sx, 0.0, 0)
-			timokha.add_child(hip)
-			var leg := MeshInstance3D.new()
-			var lb := BoxMesh.new()
-			lb.size = Vector3(0.38, 1.0, 0.42)
-			leg.mesh = lb
-			leg.position = Vector3(0, -0.5, 0)
-			leg.material_override = pants
-			hip.add_child(leg)
-			tk_legs.append(hip)
-		var torso := MeshInstance3D.new()
-		var tb := BoxMesh.new()
-		tb.size = Vector3(1.0, 1.0, 0.55)
-		torso.mesh = tb
-		torso.position = Vector3(0, 0.5, 0)
-		torso.material_override = timokha_mat
-		timokha.add_child(torso)
-		for sx in [-0.66, 0.66]:
-			var sh := Node3D.new()
-			sh.position = Vector3(sx, 0.88, 0)
-			timokha.add_child(sh)
-			var arm := MeshInstance3D.new()
-			var ab := BoxMesh.new()
-			ab.size = Vector3(0.3, 0.95, 0.32)
-			arm.mesh = ab
-			arm.position = Vector3(0, -0.44, 0)
-			arm.material_override = skin
-			sh.add_child(arm)
-			tk_arms.append(sh)
-		var head := MeshInstance3D.new()
-		var hcube := BoxMesh.new()
-		hcube.size = Vector3(0.68, 0.68, 0.68)
-		head.mesh = hcube
-		head.position = Vector3(0, 1.42, 0)
-		head.material_override = _mat(Color(0.24, 0.17, 0.12))   # куб = «волосы» вокруг лица (стиль PTTR)
-		timokha.add_child(head)
-		var ptex := _photo_tex()
-		if ptex != null:
-			# лицо из фото — decal на передней грани куба (мемность + узнаваемость)
-			# регион лица — через uv1_offset/scale (AtlasTexture в 3D-материалах НЕ работает: регион игнорируется)
-			var freg := _photo_face_region()
-			var fmat := StandardMaterial3D.new()
-			fmat.albedo_texture = ptex
-			fmat.uv1_offset = Vector3(freg.position.x, freg.position.y, 0)
-			fmat.uv1_scale = Vector3(freg.size.x, freg.size.y, 1)
-			fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-			var face := MeshInstance3D.new()
-			var qm := QuadMesh.new()
-			qm.size = Vector2(0.68, 0.68)   # лицо во всю грань куба (референс Paint the Town Red)
-			face.mesh = qm
-			face.position = Vector3(0, 1.42, -0.346)   # чуть перед гранью (фронт фигуры = -Z)
-			face.rotation.y = PI
-			face.material_override = fmat
-			timokha.add_child(face)
+		# РОБЛОКС-ФИГУРА через общий билдер (тот же используется в превью кастомизации)
+		world_head = _make_blocky_figure(timokha, tk_legs, tk_arms)
 	# ночная подсветка + цветовой телеграф рывка (_tk_signal) — для ЛЮБОГО варианта персонажа
 	tk_glow = OmniLight3D.new()
 	tk_glow.position = Vector3(0, 1.45, -0.6)   # спереди-сверху (−Z = look_at к игроку)
@@ -3031,6 +3154,12 @@ func _load_save() -> void:
 	noads = bool(data.get("noads", false))
 	gentle = bool(data.get("gentle", false))
 	photo_chosen = bool(data.get("photo_chosen", false))
+	face_dx = float(data.get("face_dx", 0.0))
+	face_dy = float(data.get("face_dy", 0.0))
+	face_zoom = clampf(float(data.get("face_zoom", 1.0)), 0.4, 3.0)
+	col_body = Color.from_string(str(data.get("col_body", "")), Color(0.90, 0.90, 0.94))
+	col_legs = Color.from_string(str(data.get("col_legs", "")), Color(0.20, 0.18, 0.24))
+	hat_id = clampi(int(data.get("hat", 0)), 0, 3)
 	wins_total = int(data.get("wins", 0))
 	caught_total = int(data.get("tot_caught", 0))
 	best_nights = int(data.get("best_nights", 0))
@@ -3052,7 +3181,9 @@ func _save_game() -> void:
 		return   # тест/скриншот-режимы не пишут сейв
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f != null:
-		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights, "photo_chosen": photo_chosen}))
+		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights, "photo_chosen": photo_chosen,
+		"face_dx": face_dx, "face_dy": face_dy, "face_zoom": face_zoom,
+		"col_body": col_body.to_html(false), "col_legs": col_legs.to_html(false), "hat": hat_id}))
 		f.close()
 
 func _load_custom_photo() -> void:
@@ -3205,11 +3336,14 @@ func _build_title() -> void:
 	)
 	title_root.add_child(bgentle)
 	var bphoto := Button.new()
-	bphoto.text = "Фото: своё · сменить" if custom_photo != null else "Загрузить фото"
+	bphoto.text = "Персонаж"
 	bphoto.size = Vector2(280, 50)
 	bphoto.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 280)
 	_style_button(bphoto, Color(0.32, 0.52, 0.72), 19)
-	bphoto.pressed.connect(_pick_photo)
+	bphoto.pressed.connect(func():
+		title_root.visible = false
+		custom_root.visible = true
+	)
 	title_root.add_child(bphoto)
 	if CC.ADS_UI:
 		var bnoads := Button.new()
@@ -3316,6 +3450,169 @@ func _build_choice() -> void:
 		prev.position = Vector2(vp.x * 0.79, vp.y * 0.28)
 		prev.modulate = Color(0.9, 0.9, 0.95)
 		choice_root.add_child(prev)
+
+func _build_custom() -> void:
+	# экран «ПЕРСОНАЖ»: живое 3D-превью + сдвиг/масштаб фото на кубе, цвета одежды, шапки
+	var layer := CanvasLayer.new()
+	layer.layer = 6
+	add_child(layer)
+	custom_root = ColorRect.new()
+	custom_root.color = Color(0.05, 0.07, 0.12, 0.96)
+	custom_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	custom_root.visible = false
+	layer.add_child(custom_root)
+	var vp := get_viewport().get_visible_rect().size
+	var t := Label.new()
+	t.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	t.offset_top = 26
+	t.offset_bottom = 78
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.add_theme_font_size_override("font_size", 40)
+	t.add_theme_color_override("font_color", Color(1.0, 0.9, 0.45))
+	t.add_theme_color_override("font_outline_color", Color(0.25, 0.1, 0.05))
+	t.add_theme_constant_override("outline_size", 9)
+	t.text = "ПЕРСОНАЖ"
+	custom_root.add_child(t)
+	# живое превью (свой мир, вращается)
+	var svc := SubViewportContainer.new()
+	svc.position = Vector2(vp.x * 0.13, 108)
+	svc.size = Vector2(300, 430)
+	custom_root.add_child(svc)
+	var sv := SubViewport.new()
+	sv.size = Vector2i(300, 430)
+	sv.own_world_3d = true
+	sv.world_3d = World3D.new()
+	sv.transparent_bg = true
+	svc.add_child(sv)
+	var pl := DirectionalLight3D.new()
+	pl.rotation_degrees = Vector3(-35, 30, 0)
+	pl.light_energy = 1.1
+	sv.add_child(pl)
+	var pcam := Camera3D.new()
+	pcam.position = Vector3(0, 1.35, 3.1)
+	pcam.rotation_degrees = Vector3(-6, 0, 0)
+	sv.add_child(pcam)
+	preview_fig = Node3D.new()
+	preview_fig.position = Vector3(0, 0.35, 0)
+	sv.add_child(preview_fig)
+	preview_head = _make_blocky_figure(preview_fig, [], [])
+	# ── контролы (правая колонка) ──
+	var cx := vp.x * 0.44
+	var bload := Button.new()
+	bload.text = "Загрузить фото"
+	bload.size = Vector2(250, 50)
+	bload.position = Vector2(cx, 108)
+	_style_button(bload, Color(0.32, 0.52, 0.72), 19)
+	bload.pressed.connect(_pick_photo)
+	custom_root.add_child(bload)
+	var lface := Label.new()
+	lface.text = "Фото на кубе:"
+	lface.position = Vector2(cx, 172)
+	lface.add_theme_font_size_override("font_size", 18)
+	lface.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	custom_root.add_child(lface)
+	var fbtns := [["<", func(): face_dx -= 0.08], [">", func(): face_dx += 0.08],
+		["^", func(): face_dy -= 0.08], ["v", func(): face_dy += 0.08],
+		["-", func(): face_zoom = maxf(0.4, face_zoom / 1.13)], ["+", func(): face_zoom = minf(3.0, face_zoom * 1.13)]]
+	for i in fbtns.size():
+		var fb := Button.new()
+		fb.text = fbtns[i][0]
+		fb.size = Vector2(52, 48)
+		fb.position = Vector2(cx + i * 60, 200)
+		_style_button(fb, Color(0.3, 0.42, 0.58), 22)
+		var cb: Callable = fbtns[i][1]
+		fb.pressed.connect(func():
+			cb.call()
+			_apply_face_uv()
+			_save_game()
+		)
+		custom_root.add_child(fb)
+	var lbody := Label.new()
+	lbody.text = "Одежда:"
+	lbody.position = Vector2(cx, 268)
+	lbody.add_theme_font_size_override("font_size", 18)
+	lbody.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	custom_root.add_child(lbody)
+	var body_cols := [Color(0.90, 0.90, 0.94), Color(0.85, 0.25, 0.22), Color(0.25, 0.5, 0.85), Color(0.3, 0.7, 0.35), Color(0.95, 0.8, 0.25), Color(0.6, 0.35, 0.75)]
+	for i in body_cols.size():
+		var c: Color = body_cols[i]
+		var sw := Button.new()
+		sw.size = Vector2(52, 48)
+		sw.position = Vector2(cx + i * 60, 296)
+		_style_button(sw, c, 18)
+		sw.pressed.connect(func():
+			col_body = c
+			timokha_mat.albedo_color = c
+			_save_game()
+		)
+		custom_root.add_child(sw)
+	var llegs := Label.new()
+	llegs.text = "Штаны:"
+	llegs.position = Vector2(cx, 362)
+	llegs.add_theme_font_size_override("font_size", 18)
+	llegs.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	custom_root.add_child(llegs)
+	var leg_cols := [Color(0.20, 0.18, 0.24), Color(0.16, 0.28, 0.5), Color(0.35, 0.22, 0.14), Color(0.15, 0.35, 0.2), Color(0.5, 0.12, 0.12), Color(0.45, 0.45, 0.5)]
+	for i in leg_cols.size():
+		var c2: Color = leg_cols[i]
+		var sw2 := Button.new()
+		sw2.size = Vector2(52, 48)
+		sw2.position = Vector2(cx + i * 60, 390)
+		_style_button(sw2, c2, 18)
+		sw2.pressed.connect(func():
+			col_legs = c2
+			legs_mat.albedo_color = c2
+			_save_game()
+		)
+		custom_root.add_child(sw2)
+	var lhat := Label.new()
+	lhat.text = "Шапка:"
+	lhat.position = Vector2(cx, 456)
+	lhat.add_theme_font_size_override("font_size", 18)
+	lhat.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	custom_root.add_child(lhat)
+	var hnames := ["Нет", "Кепка", "Шляпа", "Корона"]
+	var hprev := Button.new()
+	hprev.text = "<"
+	hprev.size = Vector2(52, 48)
+	hprev.position = Vector2(cx, 484)
+	_style_button(hprev, Color(0.3, 0.42, 0.58), 22)
+	custom_root.add_child(hprev)
+	hat_label = Label.new()
+	hat_label.text = hnames[hat_id]
+	hat_label.position = Vector2(cx + 62, 494)
+	hat_label.add_theme_font_size_override("font_size", 20)
+	hat_label.add_theme_color_override("font_color", Color(1, 1, 1))
+	custom_root.add_child(hat_label)
+	var hnext := Button.new()
+	hnext.text = ">"
+	hnext.size = Vector2(52, 48)
+	hnext.position = Vector2(cx + 180, 484)
+	_style_button(hnext, Color(0.3, 0.42, 0.58), 22)
+	custom_root.add_child(hnext)
+	hprev.pressed.connect(func():
+		hat_id = (hat_id + 3) % 4
+		hat_label.text = hnames[hat_id]
+		_rebuild_hats()
+		_save_game()
+	)
+	hnext.pressed.connect(func():
+		hat_id = (hat_id + 1) % 4
+		hat_label.text = hnames[hat_id]
+		_rebuild_hats()
+		_save_game()
+	)
+	var bdone := Button.new()
+	bdone.text = "Готово"
+	bdone.size = Vector2(220, 56)
+	bdone.position = Vector2(vp.x * 0.5 - 110, vp.y - 86)
+	_style_button(bdone, Color(0.24, 0.60, 0.34), 22)
+	bdone.pressed.connect(func():
+		custom_root.visible = false
+		if title_root != null:
+			title_root.visible = true
+	)
+	custom_root.add_child(bdone)
 
 func _start_game() -> void:
 	if title_root != null:
@@ -3836,6 +4133,8 @@ func _process(delta: float) -> void:
 		if _tut_t <= 0.0:
 			tutorial_label.visible = false
 	_update_compass()   # стрелка крутится каждый кадр — плавно (не как текст HUD на троттлинге)
+	if custom_root != null and custom_root.visible and preview_fig != null:
+		preview_fig.rotation.y += delta * 0.9   # живое превью вращается
 	if qring != null and qring.visible:
 		qring.queue_redraw()   # кольцо прогресса тоже плавное на мобиле
 	_hud_acc += delta
@@ -4066,7 +4365,7 @@ func _move_timokha(delta: float) -> void:
 				_tk_signal(Color(1.0, 0.6, 0.15), 1.3)    # ОРАНЖЕВАЯ = готовится (успей отбежать)
 				tk_state = "готовится к рывку..."
 			else:
-				timokha_mat.albedo_color = CC.BODY_COLOR
+				timokha_mat.albedo_color = col_body
 				_tk_signal(CC.GLOW_COLOR, -1.0)  # обычный бледно-лунный (энергию ведёт _day_night)
 				tk_state = "ВИДИТ ТЕБЯ!"
 		else:
@@ -4074,7 +4373,7 @@ func _move_timokha(delta: float) -> void:
 			_tele = false
 			_dash = false
 			_cd = 5.0
-			timokha_mat.albedo_color = CC.BODY_COLOR
+			timokha_mat.albedo_color = col_body
 			_tk_signal(CC.GLOW_COLOR, -1.0)
 			tk_state = "идёт на тебя..."
 	else:
@@ -4084,7 +4383,7 @@ func _move_timokha(delta: float) -> void:
 		spd = 1.5
 		tk_state = "спит у избы" if wake > 0.0 else "бродит (день)"
 		target = Vector3(3.0, timokha.global_position.y, 6.5)
-		timokha_mat.albedo_color = CC.BODY_COLOR.darkened(0.25)
+		timokha_mat.albedo_color = col_body.darkened(0.25)
 
 	var to := target - timokha.global_position
 	to.y = 0.0
