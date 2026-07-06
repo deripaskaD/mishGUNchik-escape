@@ -147,6 +147,7 @@ var qbar_fill: ColorRect
 var qbar_label: Label
 var qbar_bg: ColorRect
 var quest_card: Panel   # фон-карточка цели (фокус внимания)
+var compass_needle: Node2D   # вращающаяся стрелка-компас в карточке (плавно, не по четвертям)
 var touch_root: Control   # контейнер тач-контролов (джойстик+кнопки) — прячем на финале
 var pause_btn: Button
 var catch_label: Label
@@ -2764,6 +2765,17 @@ void fragment() {
 	quest_card.position = Vector2(vp.x * 0.5 - 260, 56)
 	quest_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(quest_card)
+	# стрелка-компас: круглая подложка + вращающаяся игла (обновляется каждый кадр в _process)
+	var rose := _round_panel(38.0, Color(0.06, 0.08, 0.13, 0.9))
+	rose.position = Vector2(vp.x * 0.5 - 260 + 8, 56 + 7)
+	layer.add_child(rose)
+	compass_needle = Node2D.new()
+	compass_needle.position = Vector2(vp.x * 0.5 - 260 + 27, 56 + 26)
+	var tri := Polygon2D.new()
+	tri.polygon = PackedVector2Array([Vector2(0, -13), Vector2(8, 9), Vector2(0, 4), Vector2(-8, 9)])
+	tri.color = Color(1.0, 0.85, 0.25)
+	compass_needle.add_child(tri)
+	layer.add_child(compass_needle)
 	quest_panel = Label.new()
 	quest_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	quest_panel.offset_top = 62
@@ -3814,6 +3826,7 @@ func _process(delta: float) -> void:
 		tutorial_label.modulate.a = clampf(_tut_t / 3.0, 0.0, 1.0)
 		if _tut_t <= 0.0:
 			tutorial_label.visible = false
+	_update_compass()   # стрелка крутится каждый кадр — плавно (не как текст HUD на троттлинге)
 	_hud_acc += delta
 	if (not _mobile) or _hud_acc >= 0.1:   # телефон: HUD/радар 10 Гц вместо 60 (строки+StyleBox каждый кадр — дорого)
 		_hud_acc = 0.0
@@ -4438,6 +4451,28 @@ func _show_gameplay_hud() -> void:
 	if hb_herbs != null and hb_herbs.get_parent() is CanvasItem:
 		(hb_herbs.get_parent() as CanvasItem).visible = true
 
+func _update_compass() -> void:
+	if compass_needle == null or player == null:
+		return
+	var show := not (won or lost or paused) and (title_root == null or not title_root.visible)
+	compass_needle.visible = show
+	if not show:
+		return
+	var tq := _nearest_target()
+	if tq.is_empty():
+		compass_needle.visible = false
+		return
+	var d3: Vector3 = (tq["pos"] as Vector3) - player.global_position
+	var dn := Vector2(d3.x, d3.z)
+	if dn.length() < 0.5:
+		return
+	dn = dn.normalized()
+	var fwd := -player.global_transform.basis.z
+	var rgt := player.global_transform.basis.x
+	var fdot := fwd.x * dn.x + fwd.z * dn.y
+	var sdot := rgt.x * dn.x + rgt.z * dn.y
+	compass_needle.rotation = atan2(sdot, fdot)   # 0 = цель прямо по курсу (стрелка вверх)
+
 func _refresh_hud() -> void:
 	if hud == null:
 		return
@@ -4501,21 +4536,9 @@ func _refresh_hud() -> void:
 	var qp := ""
 	var tq := _nearest_target()
 	if not tq.is_empty():
-		var tp: Vector3 = tq["pos"]
-		var d3: Vector3 = tp - player.global_position
+		var d3: Vector3 = (tq["pos"] as Vector3) - player.global_position
 		var dist := Vector2(d3.x, d3.z).length()
-		var dn3 := Vector3(d3.x, 0, d3.z).normalized()
-		var fwd := -player.global_transform.basis.z
-		var rgt := player.global_transform.basis.x
-		var fdot := fwd.x * dn3.x + fwd.z * dn3.z
-		var sdot := rgt.x * dn3.x + rgt.z * dn3.z
-		# ASCII-стрелки (Юникод-стрелки ↑→ нет в шрифте web-экспорта → рендерились квадратами)
-		var arrow := "^"
-		if fdot < -0.3:
-			arrow = "v"
-		elif fdot < 0.4:
-			arrow = ">" if sdot > 0 else "<"
-		qp = "%s  %s  (%0.0f м)" % [arrow, tq["label"], dist]
+		qp = "%s  (%0.0f м)" % [tq["label"], dist]   # направление показывает вращающаяся стрелка-компас
 	var cq := _current_quest()
 	if not cq.is_empty():
 		if cq["kind"] == "brew" and (wood < 2 or herbs < 2):
