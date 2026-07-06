@@ -255,4 +255,20 @@ def honk(dur=0.55, vol=0.6):
 
 # дурацкий гудок «заметил тебя»
 write("honk", honk(0.55, 0.6))
+
+
+def click(vol=0.5):
+    """Мягкий UI-клик: короткий синус-поп с быстрым затуханием (кнопки меню/тач)."""
+    n = int(SR * 0.06)
+    o = []
+    for i in range(n):
+        t = i / SR
+        s = math.sin(2 * math.pi * 850.0 * t) * 0.7 + math.sin(2 * math.pi * 1700.0 * t) * 0.3
+        env = math.exp(-60.0 * t) * (1.0 - math.exp(-2500.0 * t))
+        o.append(s * env * vol)
+    return o
+
+
+# клик кнопок UI
+write("click", click(0.5))
 print("done")

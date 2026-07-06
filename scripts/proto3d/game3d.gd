@@ -55,6 +55,7 @@ var _owl_t := 8.0
 var snd_thunder: AudioStreamPlayer
 var snd_dread: AudioStreamPlayer
 var snd_boom: AudioStreamPlayer
+var snd_click: AudioStreamPlayer   # UI-клик всех кнопок
 var snd_spotted: AudioStreamPlayer
 var light_flash: ColorRect
 var _light_v := 0.0
@@ -3313,7 +3314,8 @@ func _touch_button(root: Control, text: String, pos: Vector2, size: Vector2, is_
 	root.add_child(b)
 
 func _style_button(b: Button, base: Color, fsize: int = 24) -> void:
-	# единый детский стиль кнопок: скруглённые, цветные, с обводкой
+	# единый детский стиль кнопок: скруглённые, цветные, с обводкой + звук клика
+	b.pressed.connect(func(): _play(snd_click))
 	b.add_theme_font_size_override("font_size", fsize)
 	b.add_theme_color_override("font_color", Color(1, 1, 1))
 	b.add_theme_color_override("font_hover_color", Color(1, 1, 1))
@@ -4351,6 +4353,7 @@ func _build_audio() -> void:
 	snd_dread = _make_audio_player(_load_wav("dread", true), -60.0)   # громкость рулится в _audio_tick (саспенс)
 	snd_boom = _make_audio_player(_load_wav(CC.SND_BOOM, false), -2.0)     # мемный «вайн-бум» на джампскейрах
 	snd_spotted = _make_audio_player(_load_wav(CC.SND_SPOTTED, false), -6.0)  # дурацкий гудок «заметил тебя»
+	snd_click = _make_audio_player(_load_wav("click", false), -10.0)          # клик кнопок UI
 	if snd_rain.stream != null:
 		snd_rain.play()
 	if snd_wind != null and snd_wind.stream != null:
