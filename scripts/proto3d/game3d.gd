@@ -2116,7 +2116,7 @@ func _build_forest() -> void:
 			continue
 		var near_hut := false
 		for h in HUTS:
-			if Vector2(x - h.x, z - h.z).length() < 8.5:
+			if Vector2(x - h.x, z - h.z).length() < 11.5:
 				near_hut = true
 				break
 		if near_hut:
@@ -3132,17 +3132,29 @@ func _build_quests() -> void:
 		_small_sphere(a, 0.16, Color(0.82, 0.16, 0.12))
 	for ca in [Vector3(-43.2, 4.6, 121), Vector3(-41.0, 4.9, 122.4), Vector3(-42.8, 5.2, 120.6), Vector3(-40.7, 4.4, 121.3), Vector3(-42.1, 5.5, 122.0)]:
 		_small_sphere(ca, 0.17, Color(0.82, 0.16, 0.12))   # яблоки в кроне
-	# баня (176,28): сруб + крыша + труба
-	_box(self, Vector3(176, 1.1, 28), Vector3(4.0, 2.2, 3.2), m_log, true)
-	var broof := MeshInstance3D.new()
-	var brm := BoxMesh.new()
-	brm.size = Vector3(4.4, 0.3, 3.6)
-	broof.mesh = brm
-	broof.position = Vector3(176, 2.35, 28)
-	broof.material_override = _mat(Color(0.38, 0.26, 0.16))
-	add_child(broof)
-	_box(self, Vector3(177.4, 3.0, 28), Vector3(0.5, 1.4, 0.5), m_rock, false)
-	_smoke(Vector3(177.4, 3.9, 28), 12, 3.6, Vector3(0.25, 0.4, 0.0), 0.4, 0.9, 0.3, 10.0, 0.4, 0.9)   # дым из бани
+	# баня (176,28): мини-сруб из кита (2×2 тайла SC=2.2, дверь к тропе-западу) + труба с дымом
+	var bpos := Vector3(176, 0, 28)
+	var bsides := [[Vector3(1, 0, 0), 0.0], [Vector3(-1, 0, 0), PI], [Vector3(0, 0, 1), -PI * 0.5], [Vector3(0, 0, -1), PI * 0.5]]
+	for bsi in bsides.size():
+		var baxis: Vector3 = bsides[bsi][0]
+		var brot: float = bsides[bsi][1]
+		var blat := Vector3(0, 0, 1) if absf(baxis.x) > 0.5 else Vector3(1, 0, 0)
+		for bi in 2:
+			var bt := (float(bi) - 0.5) * 2.2
+			var bnm := "wall-wood"
+			if bsi == 1 and bi == 0:
+				bnm = "wall-wood-doorway-square"   # дверь на -X (к избе/тропе)
+			elif bsi == 3 and bi == 1:
+				bnm = "wall-wood-window-shutters"
+			_batch_scene(_kit(bnm), Transform3D(Basis(Vector3.UP, brot) * Basis.from_scale(Vector3.ONE * 2.2), bpos + baxis * (2.2 - 0.45 * 2.2) + blat * bt))
+	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(4.4, 2.6, 4.7)), bpos + Vector3(0, 2.2, 0)), m_roof)
+	_wall_col(bpos + Vector3(1.9, 1.1, 0), Vector3(0.3, 2.2, 4.6))
+	_wall_col(bpos + Vector3(0, 1.1, -1.9), Vector3(4.6, 2.2, 0.3))
+	_wall_col(bpos + Vector3(0, 1.1, 1.9), Vector3(4.6, 2.2, 0.3))
+	for bso in [-1.0, 1.0]:
+		_wall_col(bpos + Vector3(-1.9, 1.1, 1.35 * bso), Vector3(0.3, 2.2, 1.4))
+	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * 1.5), bpos + Vector3(1.0, 2.9, -0.8)))
+	_smoke(Vector3(177.0, 4.6, 27.2), 12, 3.6, Vector3(0.25, 0.4, 0.0), 0.4, 0.9, 0.3, 10.0, 0.4, 0.9)   # дым из бани
 	# кости (-150,92): могильный холм + покосившийся крест + череп + кости
 	_box(self, Vector3(-150, 0.18, 92), Vector3(2.4, 0.35, 1.4), _mat(Color(0.30, 0.22, 0.14)), false)   # холм
 	var cr := Node3D.new()
