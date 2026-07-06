@@ -274,6 +274,13 @@ var m_floor: StandardMaterial3D
 var m_rock: StandardMaterial3D
 var m_roof: StandardMaterial3D
 var m_plaster: StandardMaterial3D
+# «99 ночей»: стилизованная природа Quaternius (art/models/nature99)
+var n99_pine: Array = []
+var n99_leafy: Array = []
+var n99_spooky: Array = []
+var n99_dead: Array = []
+var n99_rocks: Array = []
+var n99_ground: Array = []
 var m_path_blocky: StandardMaterial3D
 var cabin_light: OmniLight3D   # тёплый свет избы (включается ночью)
 
@@ -695,6 +702,25 @@ void fragment() {
 			m_rock_v.append(_mat(c))
 	m_floor = _mat(Color(0.62, 0.44, 0.26) if CC.BLOCKY else Color(0.42, 0.30, 0.18))
 	m_rock = _mat(Color(0.5, 0.5, 0.52))
+	_load_n99()
+
+func _n99(nm: String) -> PackedScene:
+	return load("res://art/models/nature99/%s.gltf" % nm)
+
+func _load_n99() -> void:
+	# стилизованный лес Quaternius (CC0) — лук «99 Nights in the Forest»
+	if not ResourceLoader.exists("res://art/models/nature99/Pine_1.gltf"):
+		return
+	for i in 5:
+		n99_pine.append(_n99("Pine_%d" % (i + 1)))
+		n99_leafy.append(_n99("CommonTree_%d" % (i + 1)))
+		n99_spooky.append(_n99("TwistedTree_%d" % (i + 1)))
+	for i in 4:
+		n99_dead.append(_n99("DeadTree_%d" % (i + 1)))
+	for i in 3:
+		n99_rocks.append(_n99("Rock_Medium_%d" % (i + 1)))
+	for nm in ["Fern_1", "Grass_Wispy_Short", "Grass_Wispy_Tall", "Grass_Common_Short", "Grass_Common_Tall", "Clover_1", "Clover_2", "Plant_1", "Plant_7"]:
+		n99_ground.append(_n99(nm))
 
 const SKY_SHADER := "
 shader_type sky;
@@ -1884,6 +1910,14 @@ func _build_forest() -> void:
 			if bz > WORLD - 42.0 and abs(bx) < 55.0:   # не в озере/у яхты
 				continue
 			_tree(Vector3(bx, 0, bz), rng.randf_range(1.0, 1.6), rng.randf() < 0.3)
+	# подлесок «99 ночей»: папоротники/трава/клевер (без коллизий, в батчах)
+	if not n99_ground.is_empty() and not _autoplay:
+		for i in (170 if _mobile else 520):
+			var gx := rng.randf_range(-WORLD + 5, WORLD - 5)
+			var gz := rng.randf_range(-WORLD + 5, WORLD - 5)
+			if Vector2(gx, gz).length() < CLEARING * 0.55 or (gz > WORLD - 42.0 and absf(gx) < 55.0) or _on_path(gx, gz):
+				continue
+			_batch_scene(n99_ground[rng.randi() % n99_ground.size()], _yrot_scale(Vector3(gx, 0, gz), rng.randf() * TAU, rng.randf_range(0.8, 1.6)))
 	# валуны (больше для большой карты)
 	for i in (40 if _mobile else 95):
 		var x := rng.randf_range(-WORLD + 6, WORLD - 6)
@@ -2052,8 +2086,25 @@ func _tree(pos: Vector3, s: float, leafy: bool = false) -> void:
 	var scenes: Array = _tree_leafy if leafy else _tree_pine
 	if scenes.is_empty():
 		scenes = _load_tree_scenes(leafy)
-	if CC.BLOCKY:
-		# роблокс-дерево: цилиндр-ствол + кубы-кроны (ёлка = 3 яруса, лиственное = 2 куба)
+	if CC.BLOCKY and not n99_pine.is_empty():
+		# «99 ночей»: стилизованные деревья Quaternius; в глубине леса — кривые/мёртвые
+		var deep := Vector2(pos.x, pos.z).length() > WORLD * 0.62
+		var roll := randf()
+		var ps99: PackedScene
+		var s99 := s
+		if deep and roll < 0.30:
+			ps99 = n99_spooky[randi() % n99_spooky.size()]
+			s99 = s * 0.42   # TwistedTree в исходнике ~16.7 м
+		elif roll < 0.08:
+			ps99 = n99_dead[randi() % n99_dead.size()]
+			s99 = s * 0.85
+		elif leafy:
+			ps99 = n99_leafy[randi() % n99_leafy.size()]
+		else:
+			ps99 = n99_pine[randi() % n99_pine.size()]
+		_batch_scene(ps99, _yrot_scale(pos, randf() * TAU, s99))
+	elif CC.BLOCKY:
+		# фолбэк: роблокс-дерево из кубов (если nature99 не на месте)
 		var base := _yrot_scale(pos, randf() * TAU, s)
 		_batch_mesh(_bm_trunk, m_trunk_blocky, base * Transform3D(Basis.IDENTITY, Vector3(0, 1.8, 0)))
 		var ci := randi() % m_crowns.size()
@@ -2095,7 +2146,9 @@ func _rock(pos: Vector3, s: float) -> void:
 			var p := "res://art/models/nature/%s.glb" % n
 			if ResourceLoader.exists(p):
 				_rock_scenes.append(load(p))
-	if CC.BLOCKY:
+	if CC.BLOCKY and not n99_rocks.is_empty():
+		_batch_scene(n99_rocks[randi() % n99_rocks.size()], _yrot_scale(pos, randf() * TAU, s * 0.72))
+	elif CC.BLOCKY:
 		_batch_mesh(_bm_cube, m_rock_v[randi() % m_rock_v.size()],
 			Transform3D(Basis(Vector3.UP, randf() * TAU) * Basis.from_scale(Vector3(1.5 * s, 1.0 * s, 1.3 * s)), pos + Vector3(0, 0.38 * s, 0)))
 	elif not _rock_scenes.is_empty():
@@ -2127,7 +2180,9 @@ func _rock_cluster(cx: float, cz: float, rng: RandomNumberGenerator) -> void:
 		var a := rng.randf() * TAU
 		var r := rng.randf_range(1.0, 3.2)
 		var rp := Vector3(cx + cos(a) * r, 0, cz + sin(a) * r)
-		if CC.BLOCKY:
+		if CC.BLOCKY and not n99_rocks.is_empty():
+			_batch_scene(n99_rocks[rng.randi() % n99_rocks.size()], _yrot_scale(rp, rng.randf() * TAU, ms * 0.5))
+		elif CC.BLOCKY:
 			_batch_mesh(_bm_cube, m_rock_v[rng.randi() % m_rock_v.size()],
 				Transform3D(Basis(Vector3.UP, rng.randf() * TAU) * Basis.from_scale(Vector3(1.3 * ms, 0.9 * ms, 1.2 * ms)), rp + Vector3(0, 0.34 * ms, 0)))
 		else:
@@ -2874,16 +2929,25 @@ void fragment() {
 	layer.add_child(done_label)
 	# ── всплывающая записка лора (пергамент) ──
 	note_panel = Panel.new()
-	var nps := StyleBoxFlat.new()
-	nps.bg_color = Color(0.93, 0.86, 0.66, 0.96)   # пергамент
-	nps.border_color = Color(0.40, 0.28, 0.14)
-	nps.set_border_width_all(3)
-	nps.set_corner_radius_all(10)
-	nps.content_margin_left = 22
-	nps.content_margin_right = 22
-	nps.content_margin_top = 16
-	nps.content_margin_bottom = 16
-	note_panel.add_theme_stylebox_override("panel", nps)
+	if ResourceLoader.exists("res://art/ui/note_paper_wide.jpg"):
+		var npt := StyleBoxTexture.new()
+		npt.texture = load("res://art/ui/note_paper_wide.jpg")
+		npt.content_margin_left = 30
+		npt.content_margin_right = 30
+		npt.content_margin_top = 18
+		npt.content_margin_bottom = 18
+		note_panel.add_theme_stylebox_override("panel", npt)
+	else:
+		var nps := StyleBoxFlat.new()
+		nps.bg_color = Color(0.93, 0.86, 0.66, 0.96)   # пергамент
+		nps.border_color = Color(0.40, 0.28, 0.14)
+		nps.set_border_width_all(3)
+		nps.set_corner_radius_all(10)
+		nps.content_margin_left = 22
+		nps.content_margin_right = 22
+		nps.content_margin_top = 16
+		nps.content_margin_bottom = 16
+		note_panel.add_theme_stylebox_override("panel", nps)
 	note_panel.size = Vector2(560, 150)
 	note_panel.position = Vector2(vp.x * 0.5 - 280, vp.y * 0.5 - 75)
 	note_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -3073,11 +3137,20 @@ void fragment() {
 		pbtn.add_child(bar)
 	# оверлей победы
 	win_overlay = ColorRect.new()
-	win_overlay.color = Color(0.02, 0.05, 0.03, 0.72)
+	win_overlay.color = Color(0.02, 0.05, 0.03, 0.86)
 	win_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	win_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	win_overlay.visible = false
 	layer.add_child(win_overlay)
+	if ResourceLoader.exists("res://art/ui/lose_bg.jpg"):
+		var lbg := TextureRect.new()
+		lbg.texture = load("res://art/ui/lose_bg.jpg")
+		lbg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		lbg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		lbg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		lbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		lbg.modulate = Color(0.75, 0.75, 0.8)   # приглушить под текст статистики
+		win_overlay.add_child(lbg)
 	win_label = Label.new()
 	win_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	win_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -3369,10 +3442,23 @@ func _build_title() -> void:
 	layer.layer = 5   # поверх игрового HUD
 	add_child(layer)
 	title_root = ColorRect.new()
-	title_root.color = Color(0.05, 0.07, 0.12, 0.92)
+	title_root.color = Color(0.05, 0.07, 0.12, 1.0)
 	title_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	title_root.visible = false
 	layer.add_child(title_root)
+	if ResourceLoader.exists("res://art/ui/title_bg.jpg"):
+		var tbg := TextureRect.new()
+		tbg.texture = load("res://art/ui/title_bg.jpg")
+		tbg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		tbg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tbg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		tbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		title_root.add_child(tbg)
+		var tdim := ColorRect.new()
+		tdim.color = Color(0.03, 0.04, 0.10, 0.30)   # лёгкое затемнение под текст
+		tdim.set_anchors_preset(Control.PRESET_FULL_RECT)
+		tdim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		title_root.add_child(tdim)
 	var vp := get_viewport().get_visible_rect().size
 	var t1 := Label.new()
 	t1.set_anchors_preset(Control.PRESET_TOP_WIDE)
