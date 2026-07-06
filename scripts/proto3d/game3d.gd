@@ -52,6 +52,8 @@ var snd_laugh: AudioStreamPlayer
 var snd_crickets: AudioStreamPlayer
 var snd_owl: AudioStreamPlayer
 var _owl_t := 8.0
+var snd_birds: AudioStreamPlayer
+var _birds_t := 5.0
 var snd_thunder: AudioStreamPlayer
 var snd_dread: AudioStreamPlayer
 var snd_boom: AudioStreamPlayer
@@ -289,6 +291,7 @@ var n99_rocks: Array = []
 var n99_ground: Array = []
 var end_bg: TextureRect   # фон экрана конца (поимка/победа — разные арты)
 var cabin_light: OmniLight3D   # тёплый свет избы (включается ночью)
+var porch_lights: Array = []   # фонари у ворот избы (ночью)
 
 var pitch := 0.0
 var stun := 0.0
@@ -1154,8 +1157,10 @@ func _build_cabin() -> void:
 
 	# балка-перемычка над воротами (проём 3×3 до крыши)
 	_box(self, Vector3(0, 3.05, half - 0.05), Vector3(3.2, 0.35, 0.42), m_log, false)
-	# тёплый свет внутри — ночью льётся из двери и окон
+	# тёплый свет внутри — ночью льётся из двери и окон; фонари у ворот загораются ночью
 	cabin_light = _add_light(Vector3(0, 2.2, 0), Color(1.0, 0.78, 0.45), 0.0, 7.5)
+	for lx2 in [-2.4, 2.4]:
+		porch_lights.append(_add_light(Vector3(lx2, 2.1, half + 0.6), Color(1.0, 0.72, 0.35), 0.0, 4.5))
 	# интерьер: стол с клеёнкой + стулья + котёл (квест варки)
 	if _furn("tableCloth", Vector3(2.4, 0.14, -2.6), 2.6, PI * 0.5):
 		_furn("chair", Vector3(1.4, 0.14, -2.5), 2.5, -PI * 0.5)
@@ -4719,14 +4724,19 @@ func _physics_process(delta: float) -> void:
 		done_label.text = "Рассвет — %s ушёл, делай дела" % CC.NAME
 		done_t = 2.0
 	_was_night = nownight
-	# периодическое уханье совы ночью
+	# периодическое уханье совы ночью / щебет птиц днём
 	if _is_night():
 		_owl_t -= delta
 		if _owl_t <= 0.0:
 			_play(snd_owl)
 			_owl_t = randf_range(12.0, 26.0)
+		_birds_t = randf_range(3.0, 7.0)
 	else:
 		_owl_t = randf_range(6.0, 12.0)
+		_birds_t -= delta
+		if _birds_t <= 0.0:
+			_play(snd_birds)
+			_birds_t = randf_range(7.0, 16.0)
 	if _autoplay:
 		_autoplay_move(delta)
 	else:
@@ -4769,6 +4779,8 @@ func _day_night() -> void:
 		moon.shadow_enabled = (not _mobile) and nf > 0.5   # лунные тени деревьев (ночью пропадали — солнце гасло)
 	if cabin_light != null:                            # изба светится тёплым изнутри ночью (дверь/окна)
 		cabin_light.light_energy = lerpf(0.0, 1.7, nf)
+	for pl in porch_lights:
+		(pl as OmniLight3D).light_energy = lerpf(0.0, 1.1, nf)
 	if flashlight != null:                             # фонарик-награда: горит ночью, гаснет на рассвете
 		if nf < 0.3:
 			flashlight_on = false
@@ -5438,6 +5450,7 @@ func _build_audio() -> void:
 	snd_laugh = _make_audio_player(_load_wav(CC.SND_LAUGH, false), -5.0)
 	snd_crickets = _make_audio_player(_load_wav("crickets", true), -60.0)   # громкость растёт ночью (в _day_night)
 	snd_owl = _make_audio_player(_load_wav("owl", false), -16.0)
+	snd_birds = _make_audio_player(_load_wav("birds", false), -15.0)
 	snd_thunder = _make_audio_player(_load_wav("thunder", false), -7.0)
 	snd_dread = _make_audio_player(_load_wav("dread", true), -60.0)   # громкость рулится в _audio_tick (саспенс)
 	snd_boom = _make_audio_player(_load_wav(CC.SND_BOOM, false), -2.0)     # мемный «вайн-бум» на джампскейрах

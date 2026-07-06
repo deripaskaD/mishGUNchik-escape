@@ -272,3 +272,23 @@ def click(vol=0.5):
 # клик кнопок UI
 write("click", click(0.5))
 print("done")
+
+
+def bird_phrase(vol=0.14):
+    """Фраза щебета: 3-6 чирик-свипов с вибрато (дневной лес)."""
+    o = []
+    for _ in range(random.randint(3, 6)):
+        f0 = random.uniform(2200, 3600)
+        f1 = f0 + random.uniform(-900, 900)
+        dur = random.uniform(0.06, 0.14)
+        n = int(SR * dur)
+        for i in range(n):
+            t = i / SR
+            f = f0 + (f1 - f0) * (t / dur) + 140 * math.sin(2 * math.pi * 38 * t)
+            env = math.sin(math.pi * (i / n)) ** 2
+            o.append(math.sin(2 * math.pi * f * t) * env * vol)
+        o += sil(random.uniform(0.05, 0.18))
+    return o
+
+
+write("birds", seq(bird_phrase(), sil(0.3)))
