@@ -5567,7 +5567,11 @@ func _refresh_hud() -> void:
 		pcol = Color(1.0, 0.5, 0.45)     # красный = опасно
 	# верх-лево: только компактный цветной статус (ресурсы — в хотбаре снизу, не дублируем)
 	if OS.has_feature("web"):
-		phase += " · %d fps" % int(Performance.get_monitor(Performance.TIME_FPS))   # веб-диагностика (тестеры репортят цифру)
+		phase += " · %d fps · p%.0f φ%.0f n%.0f мс" % [
+			Performance.get_monitor(Performance.TIME_FPS),
+			Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+			Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+			Performance.get_monitor(Performance.TIME_NAVIGATION_PROCESS) * 1000.0]   # веб-диагностика
 	hud.text = phase
 	hud.add_theme_color_override("font_color", pcol)
 	# верх-центр: квест-зона (компас к цели + текущее дело), под прогресс-баром
