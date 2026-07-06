@@ -149,6 +149,7 @@ var quest_card: Panel   # фон-карточка цели (фокус вним�
 var compass_needle: Node2D
 var compass_angle := 0.0
 var compass_on := false
+var qring_near := false   # рядом с целью: рисуем подложку/дугу прогресса
 var quest_mini: Label   # вращающаяся стрелка-компас в карточке (плавно, не по четвертям)
 var touch_root: Control   # контейнер тач-контролов (джойстик+кнопки) — прячем на финале
 var pause_btn: Button
@@ -211,6 +212,7 @@ var gfx_btn: Button
 var _muted := false
 var _yacht_announced := false
 var _perf_test := false
+var _anim_probe := false
 var critters: Array = []   # амбиентная фауна: {node, ap, st, t, dir, spd, base_anim}
 var bats: Array = []       # ночные летучие мыши: пивоты кругового полёта
 var _perf_t := 0.0
@@ -490,6 +492,8 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(30, 3.0, 168)
 		player.rotate_y(PI)   # вдоль берега к морю (+Z)
+	if "--shotanim" in args:
+		_anim_probe = true
 	if "--shotfauna" in args:
 		_shot = true
 		player.global_position = Vector3(52, 1.6, 42)
@@ -1821,6 +1825,7 @@ func _spawn_critters() -> void:
 		add_child(inst)
 		var ap := inst.find_child("AnimationPlayer", true, false) as AnimationPlayer
 		if ap != null and ap.has_animation("Idle"):
+			_loop_all_anims(ap)   # gltf-клипы импортируются НЕзацикленными — зверь застывал после 1 цикла
 			ap.playback_default_blend_time = 0.35   # плавные переходы клипов
 			ap.play("Idle")
 		critters.append({"node": inst, "ap": ap, "st": "idle", "t": rng.randf_range(2.0, 5.0), "dir": Vector3.ZERO, "spd": 0.0})
@@ -1845,10 +1850,15 @@ func _spawn_bats() -> void:
 			pivot.add_child(bat)
 			var bap := bat.find_child("AnimationPlayer", true, false) as AnimationPlayer
 			if bap != null:
+				_loop_all_anims(bap)
 				bap.play("BatArmature|Bat_Flying")
 				bap.speed_scale = 1.4
 		pivot.visible = false
 		bats.append(pivot)
+
+func _loop_all_anims(ap: AnimationPlayer) -> void:
+	for an in ap.get_animation_list():
+		ap.get_animation(an).loop_mode = Animation.LOOP_LINEAR
 
 func _update_critters(delta: float) -> void:
 	var night := _is_night()
@@ -4737,8 +4747,20 @@ func _process(delta: float) -> void:
 		_refresh_hud()
 	if (_shot or _shotin) and not _shot_saved and not _perf_test:
 		_shot_t += delta
-		if _shot_t > 1.2:
+		if _anim_probe:
+			if _shot_t > 1.2 + float(_anim_frames) * 0.5:
+				_save_anim_frame()
+		elif _shot_t > 1.2:
 			_save_shot()
+
+var _anim_frames := 0
+
+func _save_anim_frame() -> void:
+	var img := get_viewport().get_texture().get_image()
+	img.save_png("user://anim_%d.png" % _anim_frames)
+	_anim_frames += 1
+	if _anim_frames >= 3:
+		get_tree().quit()
 
 func _save_shot() -> void:
 	_shot_saved = true
@@ -5166,21 +5188,26 @@ func _set_crosshair_size(s: float) -> void:
 func _draw_qring() -> void:
 	# анимированное кольцо: тёмная подложка + дуга жёлтый→зелёный с бегущей «искрой» на конце
 	var r := 30.0 + sin(clock * 8.0) * 1.6
-	qring.draw_arc(Vector2.ZERO, r, 0, TAU, 48, Color(0, 0, 0, 0.45), 7.0, true)
-	if qring_prog > 0.005:
+	if qring_near:
+		qring.draw_arc(Vector2.ZERO, r, 0, TAU, 48, Color(0, 0, 0, 0.45), 7.0, true)
+	if qring_near and qring_prog > 0.005:
 		var col := Color(1.0, 0.85, 0.25).lerp(Color(0.35, 0.95, 0.45), qring_prog)
 		var a0 := -PI * 0.5
 		var a1 := a0 + TAU * qring_prog
 		qring.draw_arc(Vector2.ZERO, r, a0, a1, 48, col, 7.0, true)
 		qring.draw_circle(Vector2(cos(a1), sin(a1)) * r, 5.0, Color(1, 1, 1, 0.95))   # искра на фронте дуги
 	if compass_on:
-		# компас: жёлтая стрелка бежит по орбите кольца, показывая направление на цель
+		# компас: заметная жёлтая стрелка на орбите кольца — направление на цель
 		var ca := compass_angle - PI * 0.5   # 0 = вверх
-		var op := Vector2(cos(ca), sin(ca)) * (r + 14.0)
-		var tip := op + Vector2(cos(ca), sin(ca)) * 9.0
-		var bl := op + Vector2(cos(ca + 2.5), sin(ca + 2.5)) * 7.0
-		var br := op + Vector2(cos(ca - 2.5), sin(ca - 2.5)) * 7.0
-		qring.draw_colored_polygon(PackedVector2Array([tip, bl, br]), Color(1.0, 0.85, 0.25, 0.95))
+		var op := Vector2(cos(ca), sin(ca)) * (r + 17.0)
+		var tip := op + Vector2(cos(ca), sin(ca)) * 13.0
+		var bl := op + Vector2(cos(ca + 2.45), sin(ca + 2.45)) * 10.0
+		var br := op + Vector2(cos(ca - 2.45), sin(ca - 2.45)) * 10.0
+		qring.draw_colored_polygon(PackedVector2Array([tip, bl, br]), Color(0, 0, 0, 0.55))
+		var tip2 := op + Vector2(cos(ca), sin(ca)) * 10.0
+		var bl2 := op + Vector2(cos(ca + 2.45), sin(ca + 2.45)) * 7.5
+		var br2 := op + Vector2(cos(ca - 2.45), sin(ca - 2.45)) * 7.5
+		qring.draw_colored_polygon(PackedVector2Array([tip2, bl2, br2]), Color(1.0, 0.85, 0.25, 0.98))
 
 func _update_quest_prompt() -> void:
 	if quest_prompt == null:
@@ -5208,9 +5235,8 @@ func _update_quest_prompt() -> void:
 			_set_crosshair_size(5.0)
 	if near_q == null or won:
 		quest_prompt.visible = false
-		if qring != null:
-			qring.visible = false
-			qring_prog = 0.0
+		qring_near = false
+		qring_prog = 0.0
 		return
 	quest_prompt.visible = true
 	var blocked := ""
@@ -5221,16 +5247,13 @@ func _update_quest_prompt() -> void:
 	if blocked != "":
 		quest_prompt.text = "%s — %s" % [str(near_q["label"]), blocked]
 		quest_prompt.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
-		if qring != null:
-			qring.visible = false
-			qring_prog = 0.0
+		qring_near = false
+		qring_prog = 0.0
 	else:
 		quest_prompt.text = str(near_q["label"])
 		quest_prompt.add_theme_color_override("font_color", Color(0.85, 1.0, 0.85))
-		if qring != null:
-			qring_prog = clampf(float(near_q["prog"]), 0.0, 1.0)
-			qring.visible = true
-			qring.queue_redraw()   # анимация кольца (пульс+дуга+искра) каждый кадр
+		qring_near = true
+		qring_prog = clampf(float(near_q["prog"]), 0.0, 1.0)
 
 func _check_catch() -> void:
 	if stun > 0.0 or wake > 0.0 or not (_is_night() or final_chase):
@@ -5393,6 +5416,10 @@ func _update_compass() -> void:
 	var show := not (won or lost or paused) and (title_root == null or not title_root.visible)
 	compass_needle.visible = false   # игла в карточке скрыта: компас рисуется на кольце
 	compass_on = false
+	if qring != null:
+		qring.visible = show
+		if show:
+			qring.queue_redraw()
 	if not show:
 		if quest_mini != null:
 			quest_mini.visible = false
@@ -5819,14 +5846,15 @@ func _window(pos: Vector3) -> void:
 	window_mats.append(pm)   # ночью теплеют/ярчают (в _day_night)
 
 func _door_leaf(half: float, h: float) -> void:
+	# распахнутая створка ворот: ПЕТЛЯ НА КОСЯКЕ (x=-1.5 — край проёма 3 м), не посреди проёма
 	var pivot := Node3D.new()
-	pivot.position = Vector3(-0.9, h * 0.5 - 0.3, half)
-	pivot.rotation_degrees = Vector3(0, -55, 0)
+	pivot.position = Vector3(-1.5, h * 0.5 - 0.3, half)
+	pivot.rotation_degrees = Vector3(0, -62, 0)
 	var leaf := MeshInstance3D.new()
 	var bm := BoxMesh.new()
-	bm.size = Vector3(1.7, 2.4, 0.08)
+	bm.size = Vector3(1.5, 2.6, 0.08)
 	leaf.mesh = bm
-	leaf.position = Vector3(0.85, 0, 0)
+	leaf.position = Vector3(0.75, 0, 0)
 	leaf.material_override = _mat(Color(0.45, 0.30, 0.18))
 	pivot.add_child(leaf)
 	add_child(pivot)
