@@ -3700,8 +3700,8 @@ func _physics_process(delta: float) -> void:
 
 func _day_night() -> void:
 	var t := fmod(clock, DAY_LEN) / DAY_LEN
-	var tq := floorf(fmod(clock, DAY_LEN) / 0.25) * 0.25 / DAY_LEN   # шаг 0.25с: стабильная карта теней (без пер-кадрового дрожания)
-	sun.rotation_degrees = Vector3(lerpf(-8.0, -172.0, tq), -40, 0)
+	# солнце плавно каждый кадр (шаг 0.25с давал рывки теней «как 12 FPS»); от мерцания защищают ORTHOGONAL+bias
+	sun.rotation_degrees = Vector3(lerpf(-8.0, -172.0, t), -40, 0)
 	# плавный коэффициент ночи (0 днём → 1 в глубокой ночи)
 	var nf := clampf(smoothstep(0.48, 0.58, t) - smoothstep(0.92, 1.0, t), 0.0, 1.0)
 	if sky_mat != null:
