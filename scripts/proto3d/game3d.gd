@@ -292,6 +292,7 @@ var n99_ground: Array = []
 var end_bg: TextureRect   # фон экрана конца (поимка/победа — разные арты)
 var cabin_light: OmniLight3D   # тёплый свет избы (включается ночью)
 var porch_lights: Array = []   # фонари у ворот избы (ночью)
+var hut_lights: Array = []     # тёплый свет хижин (ночью; днём 0 — экономия)
 
 var pitch := 0.0
 var stun := 0.0
@@ -660,7 +661,7 @@ uniform sampler2D dirt : source_color, repeat_enable, filter_linear_mipmap;
 uniform float tile = 135.0;
 uniform float patch = 46.0;
 uniform float world_size = 720.0;
-uniform float beach_z = 196.0;
+uniform float beach_z = 192.0;
 float hsh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vns(vec2 p){
 	vec2 i = floor(p); vec2 f = fract(p);
@@ -957,16 +958,22 @@ func _terrain_h(x: float, z: float) -> float:
 	if m > 0.0:
 		for h in HUTS:
 			m *= clampf((Vector2(x - h.x, z - h.z).length() - 9.0) / 8.0, 0.0, 1.0)
+	var pd := _path_dist(x, z)
 	if m > 0.0:
-		m *= clampf((WORLD - 52.0 - z) / 24.0, 0.0, 1.0)      # берег и озеро — плоские
-		m *= clampf((_path_dist(x, z) - 3.4) / 6.0, 0.0, 1.0) # тропы — ровные
-	if m <= 0.0:
-		return 0.0
-	var n := _tnoise.get_noise_2d(x, z)   # -1..1
-	var h2 := n * 1.5
-	var outside := clampf((maxf(absf(x), absf(z)) - WORLD) / 70.0, 0.0, 1.0)
-	h2 += outside * maxf(n, 0.0) * 7.0    # за стеной леса — холмы-декорации повыше
-	return h2 * m
+		m *= clampf((pd - 3.4) / 6.0, 0.0, 1.0)               # тропы — ровные
+	var h2 := 0.0
+	if m > 0.0:
+		var n := _tnoise.get_noise_2d(x, z)   # -1..1
+		h2 = n * 1.5 * m
+		var outside := clampf((maxf(absf(x), absf(z)) - WORLD) / 70.0, 0.0, 1.0)
+		h2 += outside * maxf(n, 0.0) * 7.0 * m   # за стеной леса — холмы-декорации
+	# МОРЕ: за рваной кромкой (шум по X) дно плавно уходит под воду — берег не прямоугольный
+	var edge := WORLD - 40.0 + _tnoise.get_noise_2d(x * 2.3, 17.0) * 9.0
+	var sea := clampf((z - edge) / 13.0, 0.0, 1.0)
+	h2 = lerpf(h2, -1.8, sea)
+	# песчаная коса к причалу/яхте: тропа держит высоту 0 даже через воду
+	h2 = lerpf(h2, 0.0, clampf((4.6 - pd) / 3.0, 0.0, 1.0))
+	return h2
 
 func _build_ground() -> void:
 	var body := StaticBody3D.new()
@@ -1037,14 +1044,14 @@ func _kit(name: String) -> PackedScene:
 	return load("res://art/models/town/%s.glb" % name)
 
 func _kit_house(pos: Vector3, variant: int) -> void:
-	# дом из Fantasy Town Kit (CC0): 3×3 тайла по 2 м (6×6 м), 2 пояса (4 м) —
-	# человеческий масштаб: дверной проём ~1.8 м, окна с нормальным подоконником
-	var SC := 2.0
-	var wood := variant % 2 == 0   # чередуем брус/камень
+	# дом из Fantasy Town Kit (CC0). Пропорции ОТ ДВЕРИ: дыра проёма в модуле 0.75×0.4 юнита,
+	# при SC=2.8 дверь 2.1×1.12 м (в рост), окно 0.7..1.96 м (подоконник по пояс). Один пояс, 3×3 тайла (8.4 м).
+	var SC := 2.8
+	var wood := variant % 2 == 0
 	var wall_n := "wall-wood" if wood else "wall"
 	var win_n := "wall-wood-window-shutters" if wood else "wall-window-shutters"
 	var door_n := "wall-wood-doorway-square" if wood else "wall-doorway-square"
-	var glass_n := "wall-wood-window-glass" if wood else "wall-window-shutters"
+	var half := 4.2
 	var sides := [
 		[Vector3(1, 0, 0), 0.0],
 		[Vector3(-1, 0, 0), PI],
@@ -1056,35 +1063,28 @@ func _kit_house(pos: Vector3, variant: int) -> void:
 		var rot: float = sides[si][1]
 		var lat := Vector3(0, 0, 1) if absf(axis.x) > 0.5 else Vector3(1, 0, 0)
 		for i in 3:
-			var t := (float(i) - 1.0) * SC   # центры тайлов: -2, 0, 2
-			for lvl in 2:
-				var nm := wall_n
-				if si == 2 and lvl == 0 and i == 1:
-					nm = door_n                            # фронт: дверной проём по центру
-				elif si == 2 and lvl == 0:
-					nm = win_n                             # фронт: окна по бокам двери
-				elif si == 2 and lvl == 1 and i == 1:
-					nm = glass_n                           # стекло над дверью
-				elif si < 2 and lvl == 0 and i == 1:
-					nm = win_n                             # бока: окно по центру
-				elif si == 3 and lvl == 0 and (i == 0 or i == 2):
-					nm = win_n                             # зад: два окна
-				var origin := pos + axis * (3.0 - 0.45 * SC) + lat * t + Vector3(0, lvl * SC, 0)
-				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin), m_plaster if nm == "wall" else null)
-	# пол-настил + цельная крыша + труба + фонарь у входа
-	_box(self, pos + Vector3(0, 0.06, 0), Vector3(6.0, 0.14, 6.0), m_floor, false)
-	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(6.0, 3.6, 6.36)), pos + Vector3(0, 4.0, 0)), m_roof)
-	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * 1.6), pos + Vector3(1.5, 4.7, -1.2)))
-	_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.3), pos + Vector3(2.2, 0, 3.6)))
-	_add_light(pos + Vector3(0, 2.4, -0.5), Color(1.0, 0.82, 0.55), 0.85, 5.5)   # тёплый свет внутри
+			var t := (float(i) - 1.0) * SC
+			var nm := wall_n
+			if si == 2 and i == 1:
+				nm = door_n                            # фронт: дверь в рост по центру
+			elif si == 2 or (si < 2 and i == 1) or (si == 3 and i != 1):
+				nm = win_n                             # окна: фронт по бокам двери, бока центр, зад края
+			var origin := pos + axis * (half - 0.45 * SC) + lat * t
+			_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin), m_plaster if nm == "wall" else null)
+	# пол + цельная крыша + труба + фонарь у входа
+	_box(self, pos + Vector3(0, 0.06, 0), Vector3(half * 2.0, 0.14, half * 2.0), m_floor, false)
+	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(8.4, 4.4, 8.7)), pos + Vector3(0, SC, 0)), m_roof)
+	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * 1.9), pos + Vector3(1.8, SC + 1.0, -1.6)))
+	_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.5), pos + Vector3(2.6, 0, half + 0.5)))
+	hut_lights.append(_add_light(pos + Vector3(0, 2.3, -0.5), Color(1.0, 0.82, 0.55), 0.0, 6.0))   # тёплый свет ночью
 
 func _house_col(pos: Vector3) -> void:
-	# коллизии кит-дома 6×6×4: глухие стены + фронт с проёмом 2 м по центру
-	_wall_col(pos + Vector3(0, 2.0, -3.0), Vector3(6.3, 4.0, 0.3))
-	_wall_col(pos + Vector3(-3.0, 2.0, 0), Vector3(0.3, 4.0, 6.3))
-	_wall_col(pos + Vector3(3.0, 2.0, 0), Vector3(0.3, 4.0, 6.3))
-	for sx in [-2.0, 2.0]:
-		_wall_col(pos + Vector3(sx, 2.0, 3.0), Vector3(2.0, 4.0, 0.3))
+	# коллизии кит-дома 8.4×8.4×2.8: глухие стены + фронт с дверным проёмом 1.3 м
+	_wall_col(pos + Vector3(0, 1.4, -4.2), Vector3(8.7, 2.8, 0.3))
+	_wall_col(pos + Vector3(-4.2, 1.4, 0), Vector3(0.3, 2.8, 8.7))
+	_wall_col(pos + Vector3(4.2, 1.4, 0), Vector3(0.3, 2.8, 8.7))
+	for sx in [-2.45, 2.45]:
+		_wall_col(pos + Vector3(sx, 1.4, 4.2), Vector3(3.6, 2.8, 0.3))
 
 func _wall_col(pos: Vector3, size: Vector3) -> void:
 	var b := StaticBody3D.new()
@@ -1140,29 +1140,23 @@ func _build_cabin() -> void:
 	var seg := (half * 2 - door) * 0.5
 	_wall_col(Vector3(-(door * 0.5 + seg * 0.5), H * 0.5, half), Vector3(seg, H, 0.3))
 	_wall_col(Vector3((door * 0.5 + seg * 0.5), H * 0.5, half), Vector3(seg, H, 0.3))
-	# СТЕНЫ из Fantasy Town Kit: 6×6 тайлов (SC=1.5), 2 пояса, дверь-2 тайла по центру фронта
-	var SC := 1.5
+	# СТЕНЫ из Fantasy Town Kit: один пояс SC=3.0, 3×3 тайла (9×9) — окна на уровне глаз,
+	# центр фронта открыт = ворота 3×3 (вход в рост, изнутри виден котёл)
+	var SC := 3.0
 	var csides := [[Vector3(1, 0, 0), 0.0], [Vector3(-1, 0, 0), PI], [Vector3(0, 0, 1), -PI * 0.5], [Vector3(0, 0, -1), PI * 0.5]]
 	for si in csides.size():
 		var axis: Vector3 = csides[si][0]
 		var rot: float = csides[si][1]
 		var lat := Vector3(0, 0, 1) if absf(axis.x) > 0.5 else Vector3(1, 0, 0)
-		for i in 6:
-			var t := (float(i) - 2.5) * SC
-			for lvl in 2:
-				var nm := "wall-wood"
-				if si == 2 and (i == 2 or i == 3):
-					if lvl == 1:
-						continue   # ВОРОТА: центр фронта открыт на обе высоты (вход в рост)
-					nm = "wall-wood-doorway-square"          # низ: рамки проёма
-				elif si == 2 and lvl == 0 and (i == 1 or i == 4):
-					nm = "wall-wood-window-shutters"          # окна примыкают к двери
-				elif si < 2 and lvl == 0 and (i == 2 or i == 3):
-					nm = "wall-wood-window-shutters"          # бока: пара окон по центру
-				elif si == 3 and lvl == 0 and (i == 1 or i == 4):
-					nm = "wall-wood-window-shutters"          # зад: два окна симметрично
-				var origin := Vector3(0, 0, 0) + axis * (half - 0.45 * SC) + lat * t + Vector3(0, lvl * SC, 0)
-				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin))
+		for i in 3:
+			if si == 2 and i == 1:
+				continue   # ВОРОТА: центральный тайл фронта открыт
+			var t := (float(i) - 1.0) * SC
+			var nm := "wall-wood"
+			if si == 2 or (si < 2 and i == 1) or (si == 3 and i != 1):
+				nm = "wall-wood-window-shutters"
+			var origin := Vector3(0, 0, 0) + axis * (half - 0.45 * SC) + lat * t
+			_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin))
 	# КРЫША: один модуль roof-gable на всю избу (конёк вдоль X), фронтоны-призмы по ±X
 	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(8.9, 4.6, 9.16)), Vector3(0, 3.0, 0)), m_roof)
 
@@ -1788,7 +1782,7 @@ func _spawn_critters() -> void:
 	if _autoplay:
 		return
 	var defs := [["Deer", 0.85], ["Deer", 0.9], ["Stag", 1.05], ["Fox", 0.65], ["Fox", 0.7]]
-	if _mobile:
+	if _mobile or OS.has_feature("web"):
 		defs = [["Deer", 0.9], ["Fox", 0.7]]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 777
@@ -1814,7 +1808,7 @@ func _spawn_bats() -> void:
 	if _autoplay or not ResourceLoader.exists("res://art/models/monster/Bat.fbx"):
 		return
 	var spots := [Vector3(-110, 7.0, -130), Vector3(-150, 5.5, 92), Vector3(-60, 6.5, -185)]
-	if _mobile:
+	if _mobile or OS.has_feature("web"):
 		spots = [Vector3(-110, 7.0, -130)]
 	var ps := load("res://art/models/monster/Bat.fbx") as PackedScene
 	for spot in spots:
@@ -1838,7 +1832,12 @@ func _update_critters(delta: float) -> void:
 	var night := _is_night()
 	for b in bats:
 		var bp := b as Node3D
-		bp.visible = night
+		if bp.visible != night:
+			bp.visible = night
+			for bc in bp.get_children():
+				var bap := (bc as Node3D).find_child("AnimationPlayer", true, false) as AnimationPlayer
+				if bap != null:
+					bap.active = night   # спрятан → анимация не тикает (CPU)
 		if night:
 			bp.rotation.y += delta * 0.85
 	if critters.is_empty():
@@ -1846,9 +1845,15 @@ func _update_critters(delta: float) -> void:
 	for c in critters:
 		var n := c["node"] as Node3D
 		if night:
-			n.visible = false
+			if n.visible:
+				n.visible = false
+				if c["ap"] != null:
+					(c["ap"] as AnimationPlayer).active = false
 			continue
-		n.visible = true
+		if not n.visible:
+			n.visible = true
+			if c["ap"] != null:
+				(c["ap"] as AnimationPlayer).active = true
 		c["t"] -= delta
 		var to_player := player.global_position - n.global_position
 		to_player.y = 0.0
@@ -1972,6 +1977,10 @@ func _path(a: Vector3, b: Vector3) -> void:
 	var dir := b - a
 	dir.y = 0
 	var length := dir.length()
+	if length > 14.0:
+		a += dir.normalized() * 6.0   # не начинать под избой — перекрёсток без кучи-малы
+		dir = b - a
+		length = dir.length()
 	if length < 1.0:
 		return
 	var mid := (a + b) * 0.5
@@ -2002,7 +2011,12 @@ void fragment(){
 	c *= mix(0.60, 1.06, ruts);
 	float wheel = smoothstep(0.07, 0.0, abs(UV.x - 0.32)) + smoothstep(0.07, 0.0, abs(UV.x - 0.68));
 	c *= mix(1.0, 0.68, clamp(wheel, 0.0, 1.0) * 0.7);        // две тёмные колеи вдоль
+	// рваная кромка: тропа растворяется в траву по краям и на торцах (стыки не палятся)
+	float e = vns(vec2(UV.y * len * 0.7, UV.x * 3.0)) * 0.22;
+	float side = smoothstep(0.0, 0.16 + e, UV.x) * smoothstep(1.0, 0.84 - e, UV.x);
+	float caps = smoothstep(0.0, 2.2 / len, UV.y) * smoothstep(1.0, 1.0 - 2.2 / len, UV.y);
 	ALBEDO = c * bright;
+	ALPHA = clamp(side * caps * 1.4, 0.0, 1.0);
 	ROUGHNESS = 1.0;
 }
 """
@@ -2152,7 +2166,7 @@ func _build_forest() -> void:
 				continue
 			var in_house := false
 			for h2 in HUTS:
-				if Vector2(gx - h2.x, gz - h2.z).length() < 5.5:
+				if Vector2(gx - h2.x, gz - h2.z).length() < 6.6:
 					in_house = true
 					break
 			if not in_house:
@@ -2439,11 +2453,11 @@ func _rock_cluster(cx: float, cz: float, rng: RandomNumberGenerator) -> void:
 func _build_water_and_yacht() -> void:
 	var water := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(WORLD * 2.0, 60.0)
-	pm.subdivide_width = 48   # сетка для вершинных волн
-	pm.subdivide_depth = 10
+	pm.size = Vector2(WORLD * 3.0, 340.0)
+	pm.subdivide_width = 56   # сетка для вершинных волн
+	pm.subdivide_depth = 16
 	water.mesh = pm
-	water.position = Vector3(0, 0.14, WORLD - 5.0)   # выше земли: с волнами ±0.06 диапазон 0.08..0.20 → НЕ ныряет под землю (убирает «плавание» на берегу)
+	water.position = Vector3(0, 0.14, WORLD - 40.0 + 170.0)   # от рваной береговой кромки до горизонта
 	var wsh := Shader.new()
 	wsh.code = """shader_type spatial;
 uniform vec4 col : source_color = vec4(0.16, 0.30, 0.44, 0.9);
@@ -2536,7 +2550,7 @@ func _make_player() -> void:
 	add_child(player)
 	cam = Camera3D.new()
 	cam.fov = 75.0
-	cam.far = 240.0 if _mobile else (270.0 if OS.has_feature("web") else 320.0)   # дальше всё скрыто туманом — не рисуем
+	cam.far = 240.0 if _mobile else (260.0 if OS.has_feature("web") else 290.0)   # дальше всё скрыто туманом — не рисуем
 	cam.position = Vector3(0, 0.7, 0)
 	player.add_child(cam)
 	# фонарик (награда rewarded «flashlight»): тёплый конус света до рассвета
@@ -4792,6 +4806,8 @@ func _day_night() -> void:
 		cabin_light.light_energy = lerpf(0.0, 1.7, nf)
 	for pl in porch_lights:
 		(pl as OmniLight3D).light_energy = lerpf(0.0, 1.1, nf)
+	for hl in hut_lights:
+		(hl as OmniLight3D).light_energy = lerpf(0.0, 1.0, nf)
 	if flashlight != null:                             # фонарик-награда: горит ночью, гаснет на рассвете
 		if nf < 0.3:
 			flashlight_on = false
