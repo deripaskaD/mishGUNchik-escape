@@ -213,6 +213,10 @@ var _muted := false
 var _yacht_announced := false
 var _perf_test := false
 var _anim_probe := false
+var _warmup_t := 0.0        # веб: прогрев шейдеров после «Играть» (облёт камерой за ширмой)
+var warmup_root: ColorRect
+var warmup_label: Label
+var _warm_clock_save := 0.0
 var critters: Array = []   # амбиентная фауна: {node, ap, st, t, dir, spd, base_anim}
 var bats: Array = []       # ночные летучие мыши: пивоты кругового полёта
 var _perf_t := 0.0
@@ -4237,6 +4241,8 @@ func _build_custom() -> void:
 func _start_game() -> void:
 	if title_root != null:
 		title_root.visible = false
+	if OS.has_feature("web") and _warmup_t <= 0.0 and warmup_root == null:
+		_begin_warmup()   # веб: 7 с прогрева — компилируем шейдеры разом, не фризами в игре
 	if analytics != null:
 		analytics.log_event("game_start")
 	paused = false
@@ -4729,6 +4735,7 @@ func _process(delta: float) -> void:
 			cam.position = Vector3(bx, 0.7 + by, 0)
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
+	_tick_warmup(delta)
 	_update_critters(delta)
 	if _perf_test:
 		_perf_t += delta
@@ -4956,7 +4963,44 @@ func _clamp_world(p: Vector3, margin: float = 8.0) -> Vector3:
 	var e := WORLD - margin
 	return Vector3(clampf(p.x, -e, e), p.y, clampf(p.z, -e, e))
 
+func _begin_warmup() -> void:
+	_warmup_t = 7.0
+	_warm_clock_save = clock
+	var layer := CanvasLayer.new()
+	layer.layer = 7
+	add_child(layer)
+	warmup_root = ColorRect.new()
+	warmup_root.color = Color(0.05, 0.07, 0.12, 1.0)
+	warmup_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(warmup_root)
+	warmup_label = Label.new()
+	warmup_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	warmup_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	warmup_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	warmup_label.add_theme_font_size_override("font_size", 34)
+	warmup_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
+	warmup_label.text = "Готовим остров…"
+	warmup_root.add_child(warmup_label)
+
+func _tick_warmup(delta: float) -> void:
+	if _warmup_t <= 0.0:
+		return
+	_warmup_t -= delta
+	player.rotate_y(delta * 1.85)                     # полный облёт — все материалы в кадр
+	if _warmup_t < 3.0 and _warmup_t + delta >= 3.0:
+		clock = DAY_LEN * 0.72                        # ночные варианты шейдеров
+	if warmup_label != null:
+		warmup_label.text = "Готовим остров… %d%%" % int((1.0 - _warmup_t / 7.0) * 100.0)
+	if _warmup_t <= 0.0:
+		clock = _warm_clock_save
+		if warmup_root != null:
+			warmup_root.get_parent().queue_free()
+			warmup_root = null
+			warmup_label = null
+
 func _move_player(delta: float) -> void:
+	if _warmup_t > 0.0:
+		return   # прогрев: игрока не двигаем
 	var fb := 0.0
 	var lr := 0.0
 	if stun <= 0.0 and not (_shot or _shotin):
