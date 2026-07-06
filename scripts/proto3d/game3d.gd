@@ -5527,6 +5527,8 @@ func _refresh_hud() -> void:
 		phase = "НОЧЬ · БЕГИ! · %0.0f" % ((1.0 - t) * DAY_LEN)
 		pcol = Color(1.0, 0.5, 0.45)     # красный = опасно
 	# верх-лево: только компактный цветной статус (ресурсы — в хотбаре снизу, не дублируем)
+	if OS.has_feature("web"):
+		phase += " · %d fps" % int(Performance.get_monitor(Performance.TIME_FPS))   # веб-диагностика (тестеры репортят цифру)
 	hud.text = phase
 	hud.add_theme_color_override("font_color", pcol)
 	# верх-центр: квест-зона (компас к цели + текущее дело), под прогресс-баром
