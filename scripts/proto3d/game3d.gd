@@ -619,6 +619,10 @@ func _ready() -> void:
 		else:
 			pause_controls.text = "Управление: WASD — идти · Shift — бег · мышь — осмотр\nSpace — прыжок · Esc — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
 	# реальный игрок (не скриншот/не автоплей): мир на паузе; первый запуск → выбор фото, дальше тайтл
+	if _has_diag("nohud"):
+		for ch in get_children():
+			if ch is CanvasLayer:
+				(ch as CanvasLayer).visible = false
 	if not (_shot or _shotin or _autoplay):
 		paused = true
 		if photo_chosen or custom_photo != null:
@@ -2125,6 +2129,8 @@ func _on_path(x: float, z: float) -> bool:
 	return false
 
 func _build_forest() -> void:
+	if _has_diag("noworld"):
+		return
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260627
 	var lite := _mobile or OS.has_feature("web")
