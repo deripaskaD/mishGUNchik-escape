@@ -12,7 +12,7 @@ const BORDER_TREES := 320   # плотная стена леса по перим
 const CLEARING := 11.0        # радиус поляны у избы без деревьев (меньше → лес ближе к дому)
 const HUTS := [Vector3(82, 0, -72), Vector3(136, 0, 92), Vector3(-165, 0, -50), Vector3(22, 0, 176)]
 # ориентиры-структуры — деревья оставляют вокруг них полянку (иначе густой лес их заслоняет)
-const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92)]
+const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68)]
 const LANDMARK_CLEAR := 9.0
 const SPEED := 6.2
 const SPRINT := 9.6
@@ -379,6 +379,7 @@ func _ready() -> void:
 		player.global_position = Vector3(0, 1.0, 1.0)
 	if _shot:
 		timokha.global_position = Vector3(1.0, 1.0, 10.0)   # в кадр (по центру) для проверки модели/тени
+		timokha.rotation.y = PI   # лицом к камере спавна
 	if _shothut:
 		_shot = true
 		player.global_position = HUTS[0] + Vector3(0.0, 1.0, 2.2)   # внутрь хижины смотреть на пропсы
@@ -1237,6 +1238,9 @@ func _build_structures() -> void:
 	_ground_shadow(Vector3(-60, 0, -185), 1.4); _campfire(Vector3(-60, 0, -185))   # лесной костёр у квеста «грибы»
 	_ground_shadow(Vector3(-110, 0, -130), 2.6); _windmill(Vector3(-110, 0, -130))   # мельница у квеста «дрова 2»
 	_ground_shadow(Vector3(-135, 0, 150), 1.8); _watchtower(Vector3(-135, 0, 150))   # вышка у квеста «забор»
+	_ground_shadow(Vector3(73, 0, -68), 2.0)
+	_kk_place("lumbermill", Vector3(73, 0, -68), 4.0, -PI * 0.35)   # лесопилка у квеста «дрова 1»
+	_wall_col(Vector3(73, 1.5, -68), Vector3(5.5, 3.0, 5.0))
 	_fences(Vector3(-135, 0, 150))   # ряд заборов (часть сломана) у квеста «забор»
 
 func _fences(pos: Vector3) -> void:
@@ -1525,48 +1529,20 @@ func _haystack(pos: Vector3) -> void:
 	for sx in [-0.85, 0.85]:
 		_box(self, spos + Vector3(sx, 1.55, 0), Vector3(0.12, 0.4, 0.12), hay, false)
 
+func _kk_place(nm: String, pos: Vector3, sc: float, rot: float = 0.0) -> void:
+	var path := "res://art/models/kaykit/%s.glb" % nm
+	if not ResourceLoader.exists(path):
+		return
+	var inst: Node3D = (load(path) as PackedScene).instantiate()
+	inst.position = pos
+	inst.rotation.y = rot
+	inst.scale = Vector3.ONE * sc
+	add_child(inst)
+
 func _watchtower(pos: Vector3) -> void:
-	var wood := _mat(Color(0.40, 0.30, 0.19))
-	var dark := _mat(Color(0.30, 0.22, 0.13))
-	var legs := [Vector3(-1.0, 0, -1.0), Vector3(1.0, 0, -1.0), Vector3(-1.0, 0, 1.0), Vector3(1.0, 0, 1.0)]
-	# ноги
-	for lp in legs:
-		_box(self, pos + lp + Vector3(0, 2.0, 0), Vector3(0.18, 4.0, 0.18), wood, false)
-	# горизонтальные стяжки на середине
-	_box(self, pos + Vector3(0, 2.0, -1.0), Vector3(2.2, 0.12, 0.12), dark, false)
-	_box(self, pos + Vector3(0, 2.0, 1.0), Vector3(2.2, 0.12, 0.12), dark, false)
-	_box(self, pos + Vector3(-1.0, 2.0, 0), Vector3(0.12, 0.12, 2.2), dark, false)
-	_box(self, pos + Vector3(1.0, 2.0, 0), Vector3(0.12, 0.12, 2.2), dark, false)
-	# платформа
-	_box(self, pos + Vector3(0, 4.05, 0), Vector3(2.6, 0.16, 2.6), wood, false)
-	# перила + угловые стойки
-	var rh := 4.6
-	_box(self, pos + Vector3(0, rh, -1.25), Vector3(2.6, 0.1, 0.1), dark, false)
-	_box(self, pos + Vector3(0, rh, 1.25), Vector3(2.6, 0.1, 0.1), dark, false)
-	_box(self, pos + Vector3(-1.25, rh, 0), Vector3(0.1, 0.1, 2.6), dark, false)
-	_box(self, pos + Vector3(1.25, rh, 0), Vector3(0.1, 0.1, 2.6), dark, false)
-	for lp in legs:
-		_box(self, pos + lp * 1.25 + Vector3(0, 4.4, 0), Vector3(0.1, 0.7, 0.1), dark, false)
-	# двускатная крыша
-	var roofL := MeshInstance3D.new()
-	var rb := BoxMesh.new()
-	rb.size = Vector3(3.0, 0.18, 1.8)
-	roofL.mesh = rb
-	roofL.material_override = dark
-	roofL.position = pos + Vector3(0, 5.4, -0.7)
-	roofL.rotation_degrees = Vector3(-26, 0, 0)
-	add_child(roofL)
-	var roofR := MeshInstance3D.new()
-	roofR.mesh = rb
-	roofR.material_override = dark
-	roofR.position = pos + Vector3(0, 5.4, 0.7)
-	roofR.rotation_degrees = Vector3(26, 0, 0)
-	add_child(roofR)
-	_box(self, pos + Vector3(-1.0, 5.0, 0), Vector3(0.1, 0.9, 0.1), dark, false)
-	_box(self, pos + Vector3(1.0, 5.0, 0), Vector3(0.1, 0.9, 0.1), dark, false)
-	# лесенка спереди (+Z)
-	for r in 5:
-		_box(self, pos + Vector3(0, 0.6 + r * 0.65, 1.32), Vector3(0.9, 0.08, 0.08), wood, false)
+	# сторожевая вышка из KayKit Medieval (CC0), ориентир у квеста «забор»
+	_kk_place("watchtower", pos, 4.6, PI * 0.25)
+	_wall_col(pos + Vector3(0, 2.0, 0), Vector3(2.6, 4.0, 2.6))
 
 func _windmill(pos: Vector3) -> void:
 	# каменная башня из кита: 3×3 тайла (4.5 м), 4 пояса (6 м), пирамидальная крыша, ротор из кита
@@ -1667,44 +1643,8 @@ func _campfire(pos: Vector3) -> void:
 	_smoke(pos + Vector3(0, 0.7, 0), 14, 3.2, Vector3(0, 0.35, 0), 0.5, 1.1, 0.35, 12.0, 0.5, 1.0)
 
 func _well(pos: Vector3) -> void:
-	var stone := _mat(Color(0.5, 0.5, 0.52))
-	var wood := _mat(Color(0.42, 0.30, 0.18))
-	# каменное кольцо колодца
-	var ring := MeshInstance3D.new()
-	var rc := CylinderMesh.new()
-	rc.top_radius = 0.95
-	rc.bottom_radius = 1.0
-	rc.height = 1.0
-	ring.mesh = rc
-	ring.position = pos + Vector3(0, 0.5, 0)
-	ring.material_override = stone
-	add_child(ring)
-	# тёмная «вода» внутри
-	var water := MeshInstance3D.new()
-	var wc := CylinderMesh.new()
-	wc.top_radius = 0.78
-	wc.bottom_radius = 0.78
-	wc.height = 0.06
-	water.mesh = wc
-	water.position = pos + Vector3(0, 0.94, 0)
-	water.material_override = _mat(Color(0.12, 0.20, 0.28))
-	add_child(water)
-	# два столба (от земли), поперечная балка, навес-крыша
-	_box(self, pos + Vector3(-0.95, 1.35, 0), Vector3(0.16, 2.7, 0.16), wood, false)
-	_box(self, pos + Vector3(0.95, 1.35, 0), Vector3(0.16, 2.7, 0.16), wood, false)
-	_box(self, pos + Vector3(0, 2.72, 0), Vector3(2.1, 0.16, 0.16), wood, false)
-	_box(self, pos + Vector3(0, 2.95, 0), Vector3(2.4, 0.12, 1.5), _mat(Color(0.38, 0.26, 0.16)), false)
-	# верёвка + ведро над устьем
-	_box(self, pos + Vector3(0, 2.2, 0), Vector3(0.05, 0.95, 0.05), _mat(Color(0.30, 0.25, 0.20)), false)
-	var bucket := MeshInstance3D.new()
-	var bcyl := CylinderMesh.new()
-	bcyl.top_radius = 0.22
-	bcyl.bottom_radius = 0.18
-	bcyl.height = 0.3
-	bucket.mesh = bcyl
-	bucket.position = pos + Vector3(0, 1.72, 0)
-	bucket.material_override = wood
-	add_child(bucket)
+	# колодец из KayKit Medieval (CC0), ориентир у квеста «вода»
+	_kk_place("well", pos, 2.4)
 
 func _hut_props(pos: Vector3, variant: int) -> void:
 	match variant % 4:
@@ -2448,6 +2388,26 @@ func _apply_face_uv() -> void:
 		m.uv1_offset = Vector3(rg.position.x, rg.position.y, 0)
 		m.uv1_scale = Vector3(rg.size.x, rg.size.y, 1)
 
+var tp_mats: Dictionary = {}   # материалы обтяжки тела по T-позам (только дефолтный персонаж)
+
+func _tpose_body_active() -> bool:
+	# фото-тело только у дефолтного Мишганчика; для фото друга тело остаётся цветным
+	return ResourceLoader.exists("res://art/tpose_torso_f.png") and not FileAccess.file_exists(CC.CUSTOM_PHOTO)
+
+func _tp_mat(key: String, tex_path: String, half: int = -1) -> StandardMaterial3D:
+	# half: -1 вся текстура, 0 левая половина, 1 правая (для ног из общего кропа)
+	if tp_mats.has(key):
+		return tp_mats[key]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = load(tex_path)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	m.roughness = 1.0
+	if half >= 0:
+		m.uv1_scale = Vector3(0.5, 1.0, 1.0)
+		m.uv1_offset = Vector3(0.5 * half, 0.0, 0.0)
+	tp_mats[key] = m
+	return m
+
 func _make_blocky_figure(root: Node3D, legs_out: Array, arms_out: Array) -> MeshInstance3D:
 	# блочный аватар (роблокс): ноги/торс/руки + куб-голова, ОБТЯНУТАЯ фото со всех 6 граней. Возвращает голову.
 	_ensure_shared_mats()
@@ -2464,6 +2424,22 @@ func _make_blocky_figure(root: Node3D, legs_out: Array, arms_out: Array) -> Mesh
 		leg.position = Vector3(0, -0.5, 0)
 		leg.material_override = legs_mat
 		hip.add_child(leg)
+		if _tpose_body_active():
+			var lqm := QuadMesh.new()
+			lqm.size = Vector2(0.38, 1.0)
+			var fhalf := 0 if sx > 0.0 else 1      # фронт-фото: левая половина кадра = нога +X
+			var bhalf := 1 - fhalf                  # спина — зеркально
+			var lf := MeshInstance3D.new()
+			lf.mesh = lqm
+			lf.position = Vector3(0, -0.5, -0.212)
+			lf.rotation.y = PI
+			lf.material_override = _tp_mat("leg_f%d" % fhalf, "res://art/tpose_legs_f.png", fhalf)
+			hip.add_child(lf)
+			var lbk := MeshInstance3D.new()
+			lbk.mesh = lqm
+			lbk.position = Vector3(0, -0.5, 0.212)
+			lbk.material_override = _tp_mat("leg_b%d" % bhalf, "res://art/tpose_legs_b.png", bhalf)
+			hip.add_child(lbk)
 		legs_out.append(hip)
 	var torso := MeshInstance3D.new()
 	var tb := BoxMesh.new()
@@ -2472,6 +2448,20 @@ func _make_blocky_figure(root: Node3D, legs_out: Array, arms_out: Array) -> Mesh
 	torso.position = Vector3(0, 0.5, 0)
 	torso.material_override = timokha_mat
 	root.add_child(torso)
+	if _tpose_body_active():
+		var tqm := QuadMesh.new()
+		tqm.size = Vector2(1.0, 1.0)
+		var tf := MeshInstance3D.new()
+		tf.mesh = tqm
+		tf.position = Vector3(0, 0.5, -0.277)
+		tf.rotation.y = PI
+		tf.material_override = _tp_mat("torso_f", "res://art/tpose_torso_f.png")
+		root.add_child(tf)
+		var tbk := MeshInstance3D.new()
+		tbk.mesh = tqm
+		tbk.position = Vector3(0, 0.5, 0.277)
+		tbk.material_override = _tp_mat("torso_b", "res://art/tpose_torso_b.png")
+		root.add_child(tbk)
 	for sx in [-0.66, 0.66]:
 		var sh := Node3D.new()
 		sh.position = Vector3(sx, 0.88, 0)
@@ -2758,10 +2748,10 @@ func _build_quests() -> void:
 	for i in 6:
 		_box(self, Vector3(-138.0 + float(i) * 1.6, 0.8, 150), Vector3(0.2, 1.6, 0.2), m_log, false)
 	_box(self, Vector3(-134.0, 1.25, 150), Vector3(9.6, 0.14, 0.12), m_log, false)
-	# огород-картошка (95,38): грядки + клубни
-	for i in 4:
-		_box(self, Vector3(93.0 + float(i) * 1.3, 0.15, 38.0), Vector3(1.0, 0.3, 3.0), _mat(Color(0.34, 0.24, 0.16)), false)
-	for p in [Vector3(94, 0.2, 37), Vector3(96, 0.2, 39), Vector3(95, 0.2, 36.5)]:
+	# огород-картошка (95,38): грядки KayKit + клубни
+	_kk_place("farm_plot", Vector3(93.8, 0, 38.0), 3.0)
+	_kk_place("farm_plot", Vector3(97.6, 0, 38.4), 3.0, PI)
+	for p in [Vector3(94, 0.35, 37), Vector3(96, 0.35, 39), Vector3(95, 0.35, 36.5)]:
 		_small_sphere(p, 0.18, Color(0.72, 0.6, 0.4))
 	# яблоня + яблоки (-42,120)
 	_tree(Vector3(-42, 0, 121.6), 1.6, true)
