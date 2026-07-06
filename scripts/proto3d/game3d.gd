@@ -276,6 +276,8 @@ var m_floor: StandardMaterial3D
 var m_rock: StandardMaterial3D
 var m_roof: StandardMaterial3D
 var m_path_blocky: StandardMaterial3D
+var _bm_gable: PrismMesh
+var m_gable: StandardMaterial3D
 
 var pitch := 0.0
 var stun := 0.0
@@ -429,6 +431,11 @@ func _ready() -> void:
 		paused = true
 		if choice_root != null:
 			choice_root.visible = true
+	if "--shotkit" in args:
+		_shot = true
+		_kit_house(Vector3(26, 0, 0), 0)
+		_flush_batches()
+		player.global_position = Vector3(26, 1.0, 13)
 	if "--shotcustom" in args:
 		_shot = true
 		paused = true
@@ -891,6 +898,80 @@ func _box(parent: Node, pos: Vector3, size: Vector3, mat: StandardMaterial3D, co
 		node.add_child(cs)
 	parent.add_child(node)
 
+func _kit(name: String) -> PackedScene:
+	return load("res://art/models/town/%s.glb" % name)
+
+func _kit_house(pos: Vector3, variant: int) -> void:
+	# дом из Fantasy Town Kit (CC0): 2 пояса модульных стен 4×4 тайла (6×6 м), скатная крыша, труба, фонарь
+	var SC := 1.5
+	var wood := variant % 2 == 0   # чередуем брус/камень
+	var wall_n := "wall-wood" if wood else "wall"
+	var win_n := "wall-wood-window-shutters" if wood else "wall-window-shutters"
+	var door_n := "wall-wood-doorway-square" if wood else "wall-doorway-square"
+	var glass_n := "wall-wood-window-glass" if wood else "wall-window-shutters"
+	# стороны: [нормаль-ось, поворот, фронт?]  фронт (+Z) содержит дверь
+	var sides := [
+		[Vector3(1, 0, 0), 0.0],
+		[Vector3(-1, 0, 0), PI],
+		[Vector3(0, 0, 1), PI * 0.5],
+		[Vector3(0, 0, -1), -PI * 0.5],
+	]
+	for si in sides.size():
+		var axis: Vector3 = sides[si][0]
+		var rot: float = sides[si][1]
+		var lat := Vector3(0, 0, 1) if absf(axis.x) > 0.5 else Vector3(1, 0, 0)   # направление вдоль стены
+		for i in 4:
+			var t := (float(i) - 1.5) * SC   # центры тайлов: -2.25 -0.75 0.75 2.25
+			for lvl in 2:
+				var nm := wall_n
+				if si == 2 and lvl == 0 and (i == 1 or i == 2):
+					nm = door_n                            # фронт: широкая двойная дверь по центру
+				elif lvl == 0 and (i == 0 or i == 3):
+					nm = win_n                             # окна по углам низа
+				elif lvl == 1 and (i == 1 or i == 2):
+					nm = glass_n                           # верхний пояс — окошки
+				# origin модуля: стена лежит на +X грани (смещение 0.45 юнита) → компенсируем
+				var origin := pos + axis * (3.0 - 0.45 * SC) + lat * t + Vector3(0, lvl * SC, 0)
+				_batch_scene(_kit(nm), Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * SC), origin))
+	# крыша: два ряда скатов с каждой стороны (вдоль Z) + конёк
+	for sx in [-1.0, 1.0]:
+		var rrot := 0.0 if sx > 0 else PI
+		for i in 4:
+			var tz := (float(i) - 1.5) * SC
+			_batch_scene(_kit("roof-gable"), Transform3D(Basis(Vector3.UP, rrot) * Basis.from_scale(Vector3.ONE * SC), pos + Vector3(sx * 2.2, 3.0, tz)))
+			_batch_scene(_kit("roof-gable"), Transform3D(Basis(Vector3.UP, rrot) * Basis.from_scale(Vector3.ONE * SC), pos + Vector3(sx * 0.75, 3.85, tz)))
+	for i in 4:
+		var tz2 := (float(i) - 1.5) * SC
+		_batch_scene(_kit("roof-gable-top"), Transform3D(Basis.from_scale(Vector3.ONE * SC), pos + Vector3(0, 4.72, tz2)))
+	# фронтоны: треугольные призмы закрывают торцы крыши (±Z)
+	if _bm_gable == null:
+		_bm_gable = PrismMesh.new()
+		_bm_gable.size = Vector3(6.05, 1.72, 0.18)
+		m_gable = _mat(Color(0.88, 0.80, 0.66))   # светлый фронтон под палитру кита
+	for gz in [-2.95, 2.95]:
+		_batch_mesh(_bm_gable, m_gable, Transform3D(Basis.IDENTITY, pos + Vector3(0, 3.86, gz)))
+	# труба + фонарь у двери
+	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * SC), pos + Vector3(1.6, 4.4, -1.5)))
+	_batch_scene(_kit("lantern"), Transform3D(Basis.from_scale(Vector3.ONE * 1.2), pos + Vector3(1.8, 0, 3.4)))
+
+func _house_col(pos: Vector3) -> void:
+	# коллизии кит-дома 6×6×3: глухие стены + фронт с проёмом 3 м по центру (двойная дверь кита)
+	_wall_col(pos + Vector3(0, 1.5, -3.0), Vector3(6.3, 3.0, 0.3))
+	_wall_col(pos + Vector3(-3.0, 1.5, 0), Vector3(0.3, 3.0, 6.3))
+	_wall_col(pos + Vector3(3.0, 1.5, 0), Vector3(0.3, 3.0, 6.3))
+	for sx in [-2.25, 2.25]:
+		_wall_col(pos + Vector3(sx, 1.5, 3.0), Vector3(1.5, 3.0, 0.3))
+
+func _wall_col(pos: Vector3, size: Vector3) -> void:
+	var b := StaticBody3D.new()
+	b.position = pos
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size
+	cs.shape = bs
+	b.add_child(cs)
+	add_child(b)
+
 func _house_trim(pos: Vector3, w: float, d: float, h: float, with_windows: bool) -> void:
 	# детализация построек (роблокс): белые угловые доски, конёк крыши, рама двери, ступенька, окна фасада
 	var trim := _mat(Color(0.97, 0.95, 0.90))
@@ -1101,8 +1182,9 @@ func _build_structures() -> void:
 	var i := 0
 	for h in HUTS:
 		_ground_shadow(h, 4.3)
-		_hut(h, 6.0, 6.0, 3.0, cols[i % cols.size()])
-		_house_trim(h, 6.0, 6.0, 3.0, true)
+		_kit_house(h, i)      # модульный дом из Fantasy Town Kit (CC0)
+		_house_col(h)         # невидимые коллизии (визуал — кит)
+		_box(self, h + Vector3(0, 0.05, 0), Vector3(6, 0.15, 6), m_floor, false)   # пол
 		_hut_props(h, i)
 		i += 1
 	_camp_props()   # бочки/ящики/сундук/палатка у хижин (Survival Kit)
