@@ -24,6 +24,7 @@ const FACE_REGION := Rect2(0.44, 0.02, 0.30, 0.115)  # регион ЛИЦА в 
 # ── визуал персонажа ──
 const MODEL_PATH := "res://art/models/character/mishganchik.fbx"   # 3D-модель со скелетом; нет файла → билборд-фолбэк
 const BILLBOARD_TEX := "res://art/mishganchik.png"                 # билборд-фолбэк + джампскейр + тайтл-экран
+const CUSTOM_PHOTO := "user://custom_photo.png"    # пользовательское фото («Загрузить фото» в меню) — приоритетнее BILLBOARD_TEX
 const MODEL_SCALE := 1.18                     # ~1.87 м → ~2.2 м (нависающий антагонист)
 const GLOW_COLOR := Color(0.74, 0.84, 1.0)    # обычная ночная подсветка модели (бледно-лунная)
 

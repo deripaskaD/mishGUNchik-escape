@@ -226,6 +226,8 @@ var _js_glimpse_t := 8.0     # таймер случайного «мелька�
 var win_overlay: ColorRect
 var win_label: Label
 var title_root: Control   # тайтл-экран (Играть/Графика/Дневник) — показывается на старте
+var custom_photo: Texture2D   # пользовательское фото персонажа (user://custom_photo.png)
+var _js_photo_cb: JavaScriptObject   # держим ссылку (иначе GC на вебе)
 
 # мини-карта-радар
 var radar: Control
@@ -307,6 +309,7 @@ func _ready() -> void:
 			_ap_max = 60000   # длинный прогон: проверить ПОЛНУЮ петлю до won=true
 	if not _autoplay:
 		_load_save()   # стрик/бонус-жизни/дневник/lowgfx до постройки HUD
+	_load_custom_photo()
 	ads = preload("res://scripts/proto3d/ads.gd").new()
 	ads.ads_removed = noads
 	ads.rewarded_done.connect(_on_rewarded)
@@ -741,8 +744,8 @@ func _build_environment() -> void:
 	sun.light_color = Color(1.0, 0.94, 0.83)   # тёплый солнечный свет (не белый «прожектор»)
 	sun.shadow_enabled = not _mobile   # на телефоне тени выключены (тяжело)
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL   # 1 сплит: нет мерцания на границах сплитов
-	sun.directional_shadow_max_distance = 70.0   # тени только вблизи (туман скрывает дальние) → перф ок
-	sun.shadow_blur = 2.2                          # мягче края (скрывает остаточный шиммер)
+	sun.directional_shadow_max_distance = 45.0   # короче дистанция = плотнее тексели → нет дрожи вблизи
+	sun.shadow_blur = 2.8                          # мягче края (скрывает остаточный шиммер)
 	sun.shadow_bias = 0.06
 	sun.shadow_normal_bias = 3.0
 	add_child(sun)
@@ -2042,6 +2045,7 @@ func _make_player() -> void:
 	add_child(player)
 	cam = Camera3D.new()
 	cam.fov = 75.0
+	cam.far = 240.0 if _mobile else 320.0   # дальше всё скрыто туманом — не рисуем (большая экономия GPU)
 	cam.position = Vector3(0, 0.7, 0)
 	player.add_child(cam)
 	# фонарик (награда rewarded «flashlight»): тёплый конус света до рассвета
@@ -2304,13 +2308,15 @@ func _make_timokha() -> void:
 		head.position = Vector3(0, 1.42, 0)
 		head.material_override = skin
 		timokha.add_child(head)
-		if ResourceLoader.exists(tex_path):
+		var ptex := _photo_tex()
+		if ptex != null:
 			# лицо из фото — decal на передней грани куба (мемность + узнаваемость)
 			# регион лица — через uv1_offset/scale (AtlasTexture в 3D-материалах НЕ работает: регион игнорируется)
+			var freg := _photo_face_region()
 			var fmat := StandardMaterial3D.new()
-			fmat.albedo_texture = load(tex_path)
-			fmat.uv1_offset = Vector3(CC.FACE_REGION.position.x, CC.FACE_REGION.position.y, 0)
-			fmat.uv1_scale = Vector3(CC.FACE_REGION.size.x, CC.FACE_REGION.size.y, 1)
+			fmat.albedo_texture = ptex
+			fmat.uv1_offset = Vector3(freg.position.x, freg.position.y, 0)
+			fmat.uv1_scale = Vector3(freg.size.x, freg.size.y, 1)
 			fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 			var face := MeshInstance3D.new()
 			var qm := QuadMesh.new()
@@ -2695,8 +2701,8 @@ void fragment() {
 	js_face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	js_face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	js_face.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if ResourceLoader.exists(CC.BILLBOARD_TEX):
-		js_face.texture = load(CC.BILLBOARD_TEX)
+	if _photo_tex() != null:
+		js_face.texture = _photo_tex()
 	js_root.add_child(js_face)
 	# квест-зона: карточка «ЦЕЛЬ» — единый фокус внимания (компас+дело), верх-центр
 	quest_card = Panel.new()
@@ -2979,6 +2985,79 @@ func _save_game() -> void:
 		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights}))
 		f.close()
 
+func _load_custom_photo() -> void:
+	if not FileAccess.file_exists(CC.CUSTOM_PHOTO):
+		return
+	var f := FileAccess.open(CC.CUSTOM_PHOTO, FileAccess.READ)
+	if f == null:
+		return
+	var img := Image.new()
+	if img.load_png_from_buffer(f.get_buffer(f.get_length())) == OK:
+		custom_photo = ImageTexture.create_from_image(img)
+
+func _photo_tex() -> Texture2D:
+	# фото персонажа: пользовательское (из меню) приоритетнее встроенного
+	if custom_photo != null:
+		return custom_photo
+	if ResourceLoader.exists(CC.BILLBOARD_TEX):
+		return load(CC.BILLBOARD_TEX)
+	return null
+
+func _photo_face_region() -> Rect2:
+	if custom_photo != null:
+		# произвольное фото: верхне-центральный квадрат (в портретах лицо там)
+		var w := float(custom_photo.get_width())
+		var h := float(custom_photo.get_height())
+		var side := minf(w, h * 0.62)
+		return Rect2((1.0 - side / w) * 0.5, 0.03, side / w, side / h)
+	return CC.FACE_REGION
+
+func _pick_photo() -> void:
+	if OS.has_feature("web"):
+		if _js_photo_cb == null:
+			_js_photo_cb = JavaScriptBridge.create_callback(_js_photo_picked)
+		var window := JavaScriptBridge.get_interface("window")
+		window.__gd_photo_cb = _js_photo_cb
+		JavaScriptBridge.eval("(function(){var i=document.createElement('input');i.type='file';i.accept='image/*';i.onchange=function(){var f=i.files[0];if(!f)return;var r=new FileReader();r.onload=function(){window.__gd_photo_cb(r.result);};r.readAsDataURL(f);};i.click();})();", true)
+	else:
+		var fd := FileDialog.new()
+		fd.access = FileDialog.ACCESS_FILESYSTEM
+		fd.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		fd.use_native_dialog = true
+		fd.filters = PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp ; Изображения"])
+		fd.file_selected.connect(_photo_file_selected)
+		add_child(fd)
+		fd.popup_centered()
+
+func _photo_file_selected(path: String) -> void:
+	var img := Image.new()
+	if img.load(path) == OK:
+		_apply_new_photo(img)
+
+func _js_photo_picked(args: Array) -> void:
+	if args.is_empty():
+		return
+	var data := str(args[0])
+	var comma := data.find(",")
+	if comma < 0:
+		return
+	var meta := data.substr(0, comma)
+	var raw := Marshalls.base64_to_raw(data.substr(comma + 1))
+	var img := Image.new()
+	var err := img.load_png_from_buffer(raw) if meta.contains("png") \
+		else (img.load_webp_from_buffer(raw) if meta.contains("webp") else img.load_jpg_from_buffer(raw))
+	if err == OK:
+		_apply_new_photo(img)
+
+func _apply_new_photo(img: Image) -> void:
+	# ужать до 1024 (память/скорость), сохранить в профиль, пересобрать мир с новым фото
+	var mx := maxi(img.get_width(), img.get_height())
+	if mx > 1024:
+		var k := 1024.0 / float(mx)
+		img.resize(int(img.get_width() * k), int(img.get_height() * k), Image.INTERPOLATE_LANCZOS)
+	img.save_png(CC.CUSTOM_PHOTO)
+	get_tree().reload_current_scene()
+
 func _build_title() -> void:
 	# тайтл-экран: заголовок + Мишганчик + Играть/Графика/Дневник (детям привычнее меню; мышь захватываем по «Играть»)
 	var layer := CanvasLayer.new()
@@ -3011,9 +3090,9 @@ func _build_title() -> void:
 	t2.text = "Днём делай дела. Ночью — беги. Почини яхту и сбеги с острова!"
 	title_root.add_child(t2)
 	# Мишганчик сбоку (узнаваемость + лёгкая жуть)
-	if ResourceLoader.exists(CC.BILLBOARD_TEX):
+	if _photo_tex() != null:
 		var face := TextureRect.new()
-		face.texture = load(CC.BILLBOARD_TEX)
+		face.texture = _photo_tex()
 		face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
 		face.size = Vector2(150, 477)
@@ -3053,6 +3132,13 @@ func _build_title() -> void:
 		bgentle.text = "Страх: Мягкий" if gentle else "Страх: Жуткий"
 	)
 	title_root.add_child(bgentle)
+	var bphoto := Button.new()
+	bphoto.text = "Фото: своё · сменить" if custom_photo != null else "Загрузить фото"
+	bphoto.size = Vector2(280, 50)
+	bphoto.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.42 + 280)
+	_style_button(bphoto, Color(0.32, 0.52, 0.72), 19)
+	bphoto.pressed.connect(_pick_photo)
+	title_root.add_child(bphoto)
 	if CC.ADS_UI:
 		var bnoads := Button.new()
 		bnoads.text = "Без рекламы" if noads else "Убрать рекламу"
@@ -3064,8 +3150,8 @@ func _build_title() -> void:
 	if streak > 0:
 		var st := Label.new()
 		st.set_anchors_preset(Control.PRESET_TOP_WIDE)
-		st.offset_top = vp.y * 0.42 + 280
-		st.offset_bottom = vp.y * 0.42 + 306
+		st.offset_top = vp.y * 0.42 + 342
+		st.offset_bottom = vp.y * 0.42 + 368
 		st.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		st.add_theme_font_size_override("font_size", 17)
 		st.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
@@ -3074,8 +3160,8 @@ func _build_title() -> void:
 	if wins_total > 0 or best_nights > 0:
 		var rec := Label.new()
 		rec.set_anchors_preset(Control.PRESET_TOP_WIDE)
-		rec.offset_top = vp.y * 0.42 + 306
-		rec.offset_bottom = vp.y * 0.42 + 330
+		rec.offset_top = vp.y * 0.42 + 368
+		rec.offset_bottom = vp.y * 0.42 + 392
 		rec.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		rec.add_theme_font_size_override("font_size", 15)
 		rec.add_theme_color_override("font_color", Color(0.75, 0.82, 0.9))
