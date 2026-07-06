@@ -12,7 +12,7 @@ const BORDER_TREES := 320   # плотная стена леса по перим
 const CLEARING := 11.0        # радиус поляны у избы без деревьев (меньше → лес ближе к дому)
 const HUTS := [Vector3(82, 0, -72), Vector3(136, 0, 92), Vector3(-165, 0, -50), Vector3(22, 0, 176)]
 # ориентиры-структуры — деревья оставляют вокруг них полянку (иначе густой лес их заслоняет)
-const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68)]
+const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150)]
 const LANDMARK_CLEAR := 9.0
 const SPEED := 6.2
 const SPRINT := 9.6
@@ -5007,7 +5007,12 @@ func _move_timokha(delta: float) -> void:
 		_cd = 5.0
 		spd = 1.5
 		tk_state = "спит у избы" if wake > 0.0 else "бродит (день)"
-		target = Vector3(3.0, timokha.global_position.y, 6.5)
+		wander_t -= delta
+		if wander_t <= 0.0 or wander_dir == Vector3.ZERO:
+			wander_t = randf_range(9.0, 15.0)
+			var wa := randf() * TAU
+			wander_dir = Vector3(cos(wa) * 10.5, 0, sin(wa) * 10.5)   # патруль по кольцу ВОКРУГ избы (не сквозь дом)
+		target = Vector3(wander_dir.x, timokha.global_position.y, wander_dir.z)
 		timokha_mat.albedo_color = col_body.darkened(0.25)
 
 	var to := target - timokha.global_position
