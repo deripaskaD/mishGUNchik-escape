@@ -578,6 +578,9 @@ func _ready() -> void:
 	if "--shotnote" in args:
 		_shot = true
 		_reveal_note()           # показать всплывающую записку лора
+		if note_panel != null:   # сейв может быть полным (8/8) — форсим панель для скрина
+			note_t = 9.0
+			note_label.text = "— Дневник, день 9. Лодка так и не вернулась. Туман не уходит уже неделю. Ночью кто-то ходит вокруг избы."
 	if "--shotjournal" in args:
 		_shot = true
 		_reveal_note()
@@ -1830,16 +1833,39 @@ func _hut_props(pos: Vector3, variant: int) -> void:
 			_prop_crate(pos + Vector3(3.1, 0, -0.5), 0.8)
 			_furn("pottedPlant", pos + Vector3(-3.1, 0.14, 2.6), 2.0)
 
+func _mesh_center_xz(n: Node, xf: Transform3D, mn: Array) -> void:
+	if n is Node3D:
+		xf = xf * (n as Node3D).transform
+	if n is MeshInstance3D:
+		var ab: AABB = xf * (n as MeshInstance3D).mesh.get_aabb()
+		mn[0] = minf(mn[0], ab.position.x)
+		mn[1] = maxf(mn[1], ab.position.x + ab.size.x)
+		mn[2] = minf(mn[2], ab.position.z)
+		mn[3] = maxf(mn[3], ab.position.z + ab.size.z)
+	for c in n.get_children():
+		_mesh_center_xz(c, xf, mn)
+
+var _furn_centers: Dictionary = {}
+
 func _furn(nm: String, pos: Vector3, sc: float, rot: float = 0.0) -> bool:
-	# мебель из Kenney Furniture Kit (CC0); модели миниатюрные — масштаб ~2.5 к росту
+	# мебель из Kenney Furniture Kit (CC0); origin моделей В УГЛУ — центрируем через пивот,
+	# иначе повёрнутая кровать уезжает за стену (модель растёт в +X/−Z от origin)
 	var path := "res://art/models/furniture/%s.glb" % nm
 	if not ResourceLoader.exists(path):
 		return false
 	var inst: Node3D = (load(path) as PackedScene).instantiate()
-	inst.position = pos
-	inst.rotation.y = rot
+	if not _furn_centers.has(nm):
+		var mm := [1e9, -1e9, 1e9, -1e9]
+		_mesh_center_xz(inst, Transform3D.IDENTITY, mm)
+		_furn_centers[nm] = Vector2((mm[0] + mm[1]) * 0.5, (mm[2] + mm[3]) * 0.5)
+	var c: Vector2 = _furn_centers[nm]
+	var pivot := Node3D.new()
+	pivot.position = pos
+	pivot.rotation.y = rot
+	inst.position = Vector3(-c.x * sc, 0, -c.y * sc)
 	inst.scale = Vector3.ONE * sc
-	add_child(inst)
+	pivot.add_child(inst)
+	add_child(pivot)
 	return true
 
 func _spawn_critters() -> void:
@@ -3348,13 +3374,13 @@ void fragment() {
 	layer.add_child(done_label)
 	# ── всплывающая записка лора (пергамент) ──
 	note_panel = Panel.new()
-	if ResourceLoader.exists("res://art/ui/note_paper_wide.jpg"):
+	if ResourceLoader.exists("res://art/ui/note_scroll.png"):
 		var npt := StyleBoxTexture.new()
-		npt.texture = load("res://art/ui/note_paper_wide.jpg")
-		npt.content_margin_left = 30
-		npt.content_margin_right = 30
-		npt.content_margin_top = 18
-		npt.content_margin_bottom = 18
+		npt.texture = load("res://art/ui/note_scroll.png")
+		npt.content_margin_left = 74
+		npt.content_margin_right = 74
+		npt.content_margin_top = 46
+		npt.content_margin_bottom = 42
 		note_panel.add_theme_stylebox_override("panel", npt)
 	else:
 		var nps := StyleBoxFlat.new()
@@ -3367,8 +3393,8 @@ void fragment() {
 		nps.content_margin_top = 16
 		nps.content_margin_bottom = 16
 		note_panel.add_theme_stylebox_override("panel", nps)
-	note_panel.size = Vector2(560, 150)
-	note_panel.position = Vector2(vp.x * 0.5 - 280, vp.y * 0.5 - 75)
+	note_panel.size = Vector2(580, 260)
+	note_panel.position = Vector2(vp.x * 0.5 - 290, vp.y * 0.5 - 170)
 	note_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	note_panel.modulate.a = 0.0
 	layer.add_child(note_panel)

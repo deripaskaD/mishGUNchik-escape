@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://fjl6s2n1nob4"
-path="res://.godot/imported/note_paper_wide.jpg-fda86953eb3572d838e0c11eacc0ba47.ctex"
+uid="uid://d1q7iqcb5l7i2"
+path="res://.godot/imported/note_scroll.png-c0097bdbc426ea5202ec2623e305dcbc.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://art/ui/note_paper_wide.jpg"
-dest_files=["res://.godot/imported/note_paper_wide.jpg-fda86953eb3572d838e0c11eacc0ba47.ctex"]
+source_file="res://art/ui/note_scroll.png"
+dest_files=["res://.godot/imported/note_scroll.png-c0097bdbc426ea5202ec2623e305dcbc.ctex"]
 
 [params]
 
