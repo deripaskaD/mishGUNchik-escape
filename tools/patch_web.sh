@@ -1,10 +1,8 @@
 #!/bin/bash
-# после веб-экспорта: вставить coi-serviceworker (включает threads на GitHub Pages)
+# после веб-экспорта: снять регистрацию coi-serviceworker у старых клиентов (threads откатили)
 set -e
 cd "$(dirname "$0")/.."
-if ! grep -q coi-serviceworker docs/index.html; then
-  sed -i '' 's|<head>|<head><script src="coi-serviceworker.js"></script>|' docs/index.html
-  echo "coi-serviceworker подключён"
-else
-  echo "coi уже подключён"
+if ! grep -q 'coi-unregister' docs/index.html; then
+  sed -i '' 's|<head>|<head><script id="coi-unregister">if("serviceWorker" in navigator){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){if(r.active\&\&r.active.scriptURL.indexOf("coi-serviceworker")>=0){r.unregister();}});});}</script>|' docs/index.html
+  echo "coi-unregister вставлен"
 fi
