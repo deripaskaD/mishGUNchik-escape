@@ -12,7 +12,7 @@ const BORDER_TREES := 320   # плотная стена леса по перим
 const CLEARING := 11.0        # радиус поляны у избы без деревьев (меньше → лес ближе к дому)
 const HUTS := [Vector3(82, 0, -72), Vector3(136, 0, 92), Vector3(-165, 0, -50), Vector3(22, 0, 176)]
 # ориентиры-структуры — деревья оставляют вокруг них полянку (иначе густой лес их заслоняет)
-const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150), Vector3(30, 0, 116), Vector3(150, 0, 160)]
+const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150), Vector3(30, 0, 116), Vector3(150, 0, 160), Vector3(-70, 0, -60)]
 const LANDMARK_CLEAR := 9.0
 const SPEED := 6.2
 const SPRINT := 9.6
@@ -570,6 +570,10 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--shotcirc" in args:
+		_shot = true
+		player.global_position = Vector3(-63.0, _terrain_h(-63.0, -47.0) + 1.6, -47.0)
+		player.rotate_y(0.45)   # взгляд на вход шатра
 	if "--shotferris" in args:
 		_shot = true
 		player.global_position = Vector3(144.0, _terrain_h(144.0, 172.0) + 1.6, 172.0)
@@ -1653,6 +1657,71 @@ func _build_ferris() -> void:
 		_box(seat, Vector3(0, -0.85, 0), Vector3(1.0, 0.8, 0.9), cm2, false)
 		_box(seat, Vector3(0, -0.38, 0.42), Vector3(1.0, 0.5, 0.08), cm2, false)
 		ferris_cabins.append(seat)
+
+func _build_circus() -> void:
+	# цирк-шатёр (зона 3): полосатый конус-купол, круг стен с входом с юга, флажок
+	const CIRC := Vector3(-70.0, 0.0, -60.0)
+	var by := _terrain_h(CIRC.x, CIRC.z)
+	var R := 7.0
+	var wall_m := _mat(Color(0.85, 0.3, 0.28))
+	var wall_m2 := _mat(Color(0.95, 0.9, 0.78))
+	for i in 14:
+		if i == 3 or i == 4:
+			continue   # вход (юго-восток)
+		var ang := TAU * float(i) / 14.0
+		var seg := MeshInstance3D.new()
+		var sbm := BoxMesh.new()
+		sbm.size = Vector3(3.3, 3.4, 0.3)
+		seg.mesh = sbm
+		seg.position = Vector3(CIRC.x + cos(ang) * R, by + 1.7, CIRC.z + sin(ang) * R)
+		seg.rotation.y = -ang + PI * 0.5
+		seg.material_override = wall_m if i % 2 == 0 else wall_m2
+		add_child(seg)
+		var sb := StaticBody3D.new()
+		var sc := CollisionShape3D.new()
+		var shp := BoxShape3D.new()
+		shp.size = sbm.size
+		sc.shape = shp
+		sb.add_child(sc)
+		seg.add_child(sb)
+	var pole := MeshInstance3D.new()
+	var pm := CylinderMesh.new()
+	pm.top_radius = 0.16
+	pm.bottom_radius = 0.24
+	pm.height = 8.0
+	pole.mesh = pm
+	pole.position = Vector3(CIRC.x, by + 4.0, CIRC.z)
+	pole.material_override = _mat(Color(0.5, 0.4, 0.3))
+	add_child(pole)
+	var roof := MeshInstance3D.new()
+	var rm := CylinderMesh.new()
+	rm.top_radius = 0.1
+	rm.bottom_radius = R + 1.2
+	rm.height = 3.6
+	roof.mesh = rm
+	roof.position = Vector3(CIRC.x, by + 5.2, CIRC.z)
+	var rsh := Shader.new()
+	rsh.code = """shader_type spatial;
+varying vec3 lp;
+void vertex() { lp = VERTEX; }
+void fragment() {
+	float st = step(0.5, fract(atan(lp.x, lp.z) * 2.228));
+	ALBEDO = mix(vec3(0.85, 0.27, 0.25), vec3(0.95, 0.9, 0.78), st);
+	ROUGHNESS = 0.75;
+}
+"""
+	var rshm := ShaderMaterial.new()
+	rshm.shader = rsh
+	roof.material_override = rshm
+	add_child(roof)
+	var flag := MeshInstance3D.new()
+	var fm := BoxMesh.new()
+	fm.size = Vector3(0.9, 0.5, 0.05)
+	flag.mesh = fm
+	flag.position = Vector3(CIRC.x + 0.45, by + 7.6, CIRC.z)
+	var flm := _mat(Color(1.0, 0.8, 0.2))
+	flag.material_override = flm
+	add_child(flag)
 
 func _tick_ferris(delta: float) -> void:
 	if ferris_root == null or won or lost or paused or liftoff_active:
@@ -3508,6 +3577,7 @@ void fragment() {
 	_build_night_features()
 	_build_carousel()
 	_build_ferris()
+	_build_circus()
 	if false:
 		var boat := MeshInstance3D.new()
 		var bm := BoxMesh.new()
