@@ -331,3 +331,78 @@ def chant(vol=0.55):
 
 write("sneeze", sneeze())
 write("chant", chant())
+
+
+def crooked_laugh(vol=0.5):
+    """Фирменный ломаный смех Кривого «ХА-ха-ХА-хи…» — аудио-визитка (концепт §2)."""
+    o = []
+    sylls = [(300, 0.16, 1.0), (240, 0.13, 0.7), (330, 0.18, 1.0), (390, 0.12, 0.6)]
+    for f, dur, acc in sylls:
+        n = int(SR * dur)
+        for i in range(n):
+            t = i / SR
+            fr = f * (1.0 + 0.06 * math.sin(2 * math.pi * 13 * t)) * (1.0 - 0.25 * t / dur)
+            v = math.sin(2 * math.pi * fr * t)
+            v += 0.4 * math.sin(2 * math.pi * fr * 2.02 * t)
+            breath = random.uniform(-1, 1) * 0.25 * math.exp(-9 * t)
+            env = min(1.0, i / (SR * 0.008)) * math.exp(-6.0 * t)
+            o.append((v * 0.55 + breath) * env * vol * acc)
+        o += sil(random.uniform(0.04, 0.1))
+    return o
+
+
+def siren(vol=0.32):
+    """Сирена парка за 30 сек до ночи: «С днём рождения» на пол-тона ниже, детюнено (§4)."""
+    notes = [(261.6, .28), (261.6, .2), (293.7, .45), (261.6, .45), (349.2, .45), (329.6, .8),
+             (261.6, .28), (261.6, .2), (293.7, .45), (261.6, .45), (392.0, .45), (349.2, .8)]
+    k = 0.9439
+    o = []
+    for f, dur in notes:
+        f *= k
+        n = int(SR * dur)
+        for i in range(n):
+            t = i / SR
+            v = math.sin(2 * math.pi * f * t) + 0.8 * math.sin(2 * math.pi * f * 1.013 * t)
+            env = min(1.0, i / (SR * 0.02)) * min(1.0, (n - i) / (SR * 0.05))
+            o.append(v * 0.4 * env * vol)
+    return o
+
+
+def disco(vol=0.45):
+    """Диско-врезка (ночное событие: Кривой танцует 3 сек — окно побега)."""
+    o = []
+    bpm = 126.0
+    beat = 60.0 / bpm
+    bass = [110, 110, 146.8, 98]
+    for b in range(6):
+        n = int(SR * beat)
+        fb = bass[b % 4]
+        for i in range(n):
+            t = i / SR
+            kick = math.sin(2 * math.pi * (60 + 60 * math.exp(-30 * t)) * t) * math.exp(-9 * t)
+            bs = math.sin(2 * math.pi * fb * t) * 0.5 * (1 if (i // max(1, int(SR * beat / 2))) % 2 == 0 else 0.6)
+            hat = random.uniform(-1, 1) * 0.12 * math.exp(-40 * ((t + beat / 2) % beat))
+            o.append((kick * 0.8 + bs * 0.4 + hat) * vol)
+    return o
+
+
+def firework(vol=0.5):
+    """Старый фейерверк сам запускается (дневное событие)."""
+    o = []
+    n = int(SR * 0.7)
+    for i in range(n):
+        t = i / SR
+        f = 500 + 1300 * (t / 0.7)
+        o.append(math.sin(2 * math.pi * f * t) * 0.2 * vol)
+    n2 = int(SR * 0.8)
+    for i in range(n2):
+        t = i / SR
+        env = math.exp(-4.5 * t)
+        o.append((random.uniform(-1, 1) * 0.8 + math.sin(2 * math.pi * 90 * t) * 0.5) * env * vol)
+    return o
+
+
+write("crooked_laugh", crooked_laugh())
+write("siren", siren())
+write("disco", disco())
+write("firework", firework())

@@ -55,6 +55,16 @@ var _owl_t := 8.0
 var snd_birds: AudioStreamPlayer
 var snd_sneeze: AudioStreamPlayer
 var snd_chant: AudioStreamPlayer
+var snd_claugh: AudioStreamPlayer
+var snd_siren: AudioStreamPlayer
+var snd_disco: AudioStreamPlayer
+var snd_firework: AudioStreamPlayer
+# ── событийный движок (концепт §7): каждые 45–90 с что-то происходит ──
+var _ev_t := 55.0
+var _ev_recent: Array = []
+var _siren_played := false
+var tk_disco_t := 0.0        # Кривой танцует (окно побега, мем-момент)
+var tk_trip_t := 0.0         # Кривой споткнулся
 var flash_unlocked := false   # P: фонарик — награда за Ночь 1 (навсегда)
 var _birds_t := 5.0
 var snd_thunder: AudioStreamPlayer
@@ -171,15 +181,17 @@ var paused := false
 var pause_overlay: ColorRect
 var pause_controls: Label
 # ── ЛОР: записки, раскрывающиеся по мере выполнения дневных дел (драйвер «теорий», длиннее сессия) ──
+# Лор «Остров Смеха» (концепт-док): записки друга КРИВЫМ ПОЧЕРКОМ изнутри Кривого.
+# Правда раскрывается к середине: монстр — заколдованный друг, зеркало забрало его.
 const LORE := [
-	"Дневник, день 1. Все уехали с острова на большой лодке. Меня не взяли — сказали, вернутся к утру.",
-	"День 9. Лодка так и не вернулась. Туман не уходит уже неделю. Ночью кто-то ходит вокруг избы.",
-	"Старики звали его {N} — сторож острова. Я думал, это просто страшилка для детей.",
-	"День 20. Я больше не один. Он не злой… просто не хочет, чтобы кто-то уплывал. Боится остаться совсем один.",
-	"У идола вырезано: «Кто построит лодку — разбудит сторожа. Кто уплывёт — освободит его».",
-	"Под мельницей — старый колодец. На дне виден свет. Туда уходили те, кто пытался сбежать…",
-	"День 40. Яхта почти готова. Если читаешь это — ночью только БЕГИ. Он быстрее, когда ты стоишь.",
-	"Я уплыл. Но в тумане за островом горят ещё огни. {N} был не единственным сторожем… (продолжение следует)",
+	"Записка №1 (кривым почерком): «Это я, {N}! Мы же на спор сюда приплыли, помнишь? НЕ ЗАХОДИ в Комнату Смеха!»",
+	"Записка №2: «Зеркало засмеялось ПЕРВЫМ. Теперь я смотрю на тебя откуда-то… снаружи себя. ХА-ХА. Это не я смеюсь.»",
+	"Записка №3: «Большой и кривой — это НЕ я. То есть я. То есть… беги от него. Но не бросай меня, ладно?»",
+	"Записка №4: «Не смотри в зеркала после заката. Пожалуйста. Они запоминают.»",
+	"Записка №5: «Он гоняется не со зла. Кривые не выносят одиночества — зеркало велит привести второго. Меня хватило одного…»",
+	"Записка №6: «Мне тут скучно, ХА-ХА, зачёркнуто, СТРАШНО. Днём я прячусь внутри него и пишу тебе. Ночью пишет ОН.»",
+	"Записка №7: «Почини яхту и уплывай. Только… посмотри на него в последний раз. Вдруг узнаешь меня?»",
+	"Записка №8: «Ты уплыл? Молодец. А знаешь, что смешно? Кривых в коллекции Директора было БОЛЬШЕ… (продолжение следует)»",
 ]
 var note_panel: Panel
 var note_label: Label
@@ -1959,6 +1971,136 @@ func _spawn_bats() -> void:
 func _loop_all_anims(ap: AnimationPlayer) -> void:
 	for an in ap.get_animation_list():
 		ap.get_animation(an).loop_mode = Animation.LOOP_LINEAR
+
+func _event_director(delta: float) -> void:
+	# «каждую минуту что-то происходит»: пул событий дня/ночи, антиповтор (§7)
+	if _autoplay or _shot or _shotin or paused or won or lost or _warmup_frames > 0:
+		return
+	# сирена парка за ~30 с до ночи (жутко-смешное предупреждение)
+	var t := fmod(clock, DAY_LEN) / DAY_LEN
+	if t > 0.52 - 30.0 / DAY_LEN and t <= 0.52 and wake <= 0.0:
+		if not _siren_played:
+			_siren_played = true
+			_play(snd_siren)
+			if done_label != null:
+				done_label.add_theme_color_override("font_color", Color(1.0, 0.7, 0.4))
+				done_label.text = "Скоро стемнеет…"
+				done_t = 2.4
+	elif t < 0.1:
+		_siren_played = false
+	_ev_t -= delta
+	if _ev_t > 0.0:
+		return
+	_ev_t = randf_range(45.0, 90.0)
+	var night := _is_night()
+	var pool: Array = ["laugh_pa", "shadow", "firework", "confetti"] if not night else ["disco", "trip", "lights", "voice"]
+	pool.shuffle()
+	for ev in pool:
+		if ev in _ev_recent:
+			continue
+		_ev_recent.append(ev)
+		if _ev_recent.size() > 3:
+			_ev_recent.pop_front()
+		_run_event(ev)
+		return
+
+func _run_event(ev: String) -> void:
+	match ev:
+		"laugh_pa":
+			# по громкой связи — ломаный смех и имя монстра (жутко-смешно)
+			_play(snd_claugh)
+			if done_label != null:
+				done_label.add_theme_color_override("font_color", Color(0.8, 0.85, 1.0))
+				done_label.text = "— %s… ХА-ха-ХА-хи…" % _cname().to_upper()
+				done_t = 2.2
+		"shadow":
+			# «странная тень пробежала» — саспенс-билдер, ничего не происходит
+			if vignette != null and vignette.material != null:
+				shake = maxf(shake, 0.25)
+			_play(snd_step2 if snd_step2 != null else null)
+		"firework":
+			_play(snd_firework)
+			_spawn_firework()
+		"confetti":
+			_spawn_confetti()
+		"disco":
+			# Кривой останавливается и танцует 3 сек — ОКНО ПОБЕГА (главный мем)
+			if timokha != null and _is_night() and wake <= 0.0:
+				tk_disco_t = 3.0
+				_play(snd_disco)
+				if done_label != null:
+					done_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.9))
+					done_label.text = "ДИСКО! %s не удержался — беги!" % _cname()
+					done_t = 2.4
+		"trip":
+			# Кривой спотыкается (смех-бит, окно побега)
+			if timokha != null and _is_night():
+				tk_trip_t = 1.6
+				_play(snd_boom)
+				if done_label != null:
+					done_label.add_theme_color_override("font_color", Color(0.7, 1.0, 0.7))
+					done_label.text = "— Ой!.. (он споткнулся)"
+					done_t = 1.8
+		"lights":
+			# свет гаснет на 2 секунды по всему острову
+			_blackout(2.0)
+		"voice":
+			# голос друга изнутри Кривого
+			_play(snd_claugh)
+			if done_label != null:
+				done_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.45))
+				var lines := ["— Я же вожу-у-у… стой!", "— Ну хвааатит, я просто хочу поигра-а-ать!", "— Мне тут скучно… ХА-ХА… СТРАШНО!"]
+				done_label.text = lines[randi() % lines.size()]
+				done_t = 2.6
+
+var _blackout_t := 0.0
+
+func _blackout(dur: float) -> void:
+	_blackout_t = dur
+
+func _spawn_firework() -> void:
+	var fw := CPUParticles3D.new()
+	fw.position = player.global_position + Vector3(randf_range(-25, 25), 26.0, randf_range(-25, 25))
+	fw.amount = 60
+	fw.lifetime = 1.4
+	fw.one_shot = true
+	fw.explosiveness = 1.0
+	fw.spread = 180.0
+	fw.initial_velocity_min = 6.0
+	fw.initial_velocity_max = 11.0
+	fw.gravity = Vector3(0, -3.5, 0)
+	var fm := SphereMesh.new()
+	fm.radius = 0.12
+	fm.height = 0.24
+	fw.mesh = fm
+	var cols := [Color(1, 0.4, 0.3), Color(0.4, 0.8, 1.0), Color(1.0, 0.9, 0.3)]
+	fw.material_override = _emissive_mat(cols[randi() % 3], cols[randi() % 3], 3.0)
+	add_child(fw)
+	fw.emitting = true
+	get_tree().create_timer(3.0).timeout.connect(func(): fw.queue_free())
+
+func _spawn_confetti() -> void:
+	var cf := CPUParticles3D.new()
+	cf.position = player.global_position + Vector3(0, 7.0, 0)
+	cf.amount = 90
+	cf.lifetime = 2.6
+	cf.one_shot = true
+	cf.explosiveness = 0.9
+	cf.spread = 70.0
+	cf.gravity = Vector3(0, -2.2, 0)
+	cf.initial_velocity_min = 1.0
+	cf.initial_velocity_max = 3.0
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.14, 0.14)
+	cf.mesh = qm
+	cf.material_override = _mat(Color(1.0, 0.5, 0.8))
+	add_child(cf)
+	cf.emitting = true
+	if done_label != null:
+		done_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.95))
+		done_label.text = "Дождь из конфетти?! 🎉"
+		done_t = 1.8
+	get_tree().create_timer(4.0).timeout.connect(func(): cf.queue_free())
 
 func _update_critters(delta: float) -> void:
 	var night := _is_night()
@@ -5024,6 +5166,7 @@ func _process(delta: float) -> void:
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
 	_tick_warmup(delta)
 	_update_critters(delta)
+	_event_director(delta)
 	if _perf_test:
 		_perf_t += delta
 		if _perf_t > 2.0 and _perf_t < 8.0:
@@ -5220,6 +5363,11 @@ func _day_night() -> void:
 		moon.visible = nf > 0.02
 		moon.light_energy = lerpf(0.0, 0.34, nf)
 		moon.shadow_enabled = (not _mobile) and nf > 0.5   # лунные тени деревьев (ночью пропадали — солнце гасло)
+	if _blackout_t > 0.0:
+		_blackout_t -= get_process_delta_time()
+		env.ambient_light_energy = 0.02
+		sun.light_energy = 0.02
+		moon.light_energy = 0.02
 	if cabin_light != null:                            # изба светится тёплым изнутри ночью (дверь/окна)
 		cabin_light.light_energy = lerpf(0.0, 1.7, nf)
 	for pl in porch_lights:
@@ -5346,12 +5494,29 @@ func _move_timokha(delta: float) -> void:
 	var hunting := (_is_night() and wake <= 0.0) or (final_chase and wake <= 0.0)
 	var target := player.global_position
 	var spd := 0.0
+	# события: диско-танец (3 с крутится) и спотыкание (1.6 с лежит) — окна побега
+	if tk_disco_t > 0.0:
+		tk_disco_t -= delta
+		timokha.rotation.y += delta * 9.0
+		for n in tk_arms:
+			n.rotation.x = sin(clock * 14.0) * 1.2
+		for n in tk_legs:
+			n.rotation.x = -sin(clock * 14.0) * 0.6
+		return
+	if tk_trip_t > 0.0:
+		tk_trip_t -= delta
+		timokha.rotation.x = lerpf(timokha.rotation.x, 0.9, 0.3)   # завалился вперёд
+		if tk_trip_t <= 0.0:
+			timokha.rotation.x = 0.0
+		return
+	timokha.rotation.x = 0.0
 	if hunting:
 		# НЕОТСТУПНАЯ ОХОТА: ночью (или в финальной погоне) Мишганчик всегда знает, где игрок.
 		var dist := player.global_position.distance_to(timokha.global_position)
 		last_seen = player.global_position
 		target = player.global_position
-		spd = TIMOKHA_NIGHT * 1.22 if final_chase else TIMOKHA_NIGHT   # финал — быстрее, нагнетает
+		var esc := 0.82 if nights <= 1 else (1.0 if nights < 6 else 1.12)   # ночь 1 проходима всеми; 6+ злее
+		spd = TIMOKHA_NIGHT * 1.22 if final_chase else TIMOKHA_NIGHT * esc
 		tk_aggro = _has_los()
 		if _spotted_cd > 0.0:
 			_spotted_cd -= delta
@@ -6007,6 +6172,10 @@ func _build_audio() -> void:
 	snd_birds = _make_audio_player(_load_wav("birds", false), -15.0)
 	snd_sneeze = _make_audio_player(_load_wav("sneeze", false), -8.0)
 	snd_chant = _make_audio_player(_load_wav("chant", false), -10.0)
+	snd_claugh = _make_audio_player(_load_wav("crooked_laugh", false), -9.0)
+	snd_siren = _make_audio_player(_load_wav("siren", false), -13.0)
+	snd_disco = _make_audio_player(_load_wav("disco", false), -9.0)
+	snd_firework = _make_audio_player(_load_wav("firework", false), -11.0)
 	snd_thunder = _make_audio_player(_load_wav("thunder", false), -7.0)
 	snd_dread = _make_audio_player(_load_wav("dread", true), -60.0)   # громкость рулится в _audio_tick (саспенс)
 	snd_boom = _make_audio_player(_load_wav(CC.SND_BOOM, false), -2.0)     # мемный «вайн-бум» на джампскейрах
