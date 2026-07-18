@@ -406,3 +406,38 @@ write("crooked_laugh", crooked_laugh())
 write("siren", siren())
 write("disco", disco())
 write("firework", firework())
+
+
+def carousel_tune():
+    """Шарманка карусели: расстроенный вальс «музыкальной шкатулки», бесшовный луп.
+    Слегка детюненные ноты = старый заброшенный парк (жутко-смешно, не хоррор)."""
+    bpm = 150.0
+    beat = 60.0 / bpm
+    n_total = int(SR * beat * 24)   # 8 тактов вальса 3/4
+    o = [0.0] * (n_total + int(SR * 0.6))
+    def note(t0, f, dur, vol):
+        det = 1.0 + random.uniform(-0.004, 0.004)   # расстроенность
+        start = int(SR * t0)
+        n = int(SR * dur)
+        for i in range(n):
+            t = i / SR
+            env = min(1.0, t / 0.01) * math.exp(-3.2 * t)
+            x = math.sin(2 * math.pi * f * det * t) + 0.35 * math.sin(2 * math.pi * f * det * 2.0 * t)
+            if start + i < len(o):
+                o[start + i] += x * env * vol
+    C, D, E, F, G, A, Bb, C2 = 523.25, 587.33, 659.25, 698.46, 783.99, 880.0, 932.33, 1046.5
+    bass = [C * 0.5, C * 0.5, F * 0.5, C * 0.5, G * 0.5, G * 0.5, F * 0.5, C * 0.5]
+    mel = [
+        [E, G, C2], [G, E, D], [F, A, C2], [E, C, E],
+        [D, G, Bb], [G, D, G], [F, E, D], [C, C, C],
+    ]
+    for bar in range(8):
+        t_bar = bar * 3 * beat
+        note(t_bar, bass[bar], beat * 0.9, 0.30)
+        note(t_bar + beat, bass[bar] * 2.0, beat * 0.55, 0.16)
+        note(t_bar + 2 * beat, bass[bar] * 2.0, beat * 0.55, 0.16)
+        for k in range(3):
+            note(t_bar + k * beat, mel[bar][k], beat * 0.85, 0.22)
+    return wrap_xfade(o, n_total, int(SR * 0.6))
+
+write("carousel_tune", carousel_tune())

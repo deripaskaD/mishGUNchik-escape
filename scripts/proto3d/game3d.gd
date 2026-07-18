@@ -113,6 +113,7 @@ const CAR_POS := Vector3(30.0, 0.0, 116.0)   # карусель старого �
 var car_root: Node3D
 var car_horses: Array = []
 var _car_hit_cd := 0.0
+var car_snd: AudioStreamPlayer3D
 var machine_cd := [0.0, 0.0, 0.0]
 var machine_line := [0, 0, 0]
 var machine_lamps: Array = []
@@ -1556,12 +1557,25 @@ void fragment() {
 			for lz2 in [-0.12, 0.12]:
 				_box(horse, Vector3(lx, -0.4, lz2), Vector3(0.09, 0.42, 0.09), hm, false)
 		car_horses.append(horse)
+	# шарманка: слышна при приближении, ночью — медленнее и ниже (жутче)
+	var tune := _load_wav("carousel_tune", true)
+	if tune != null:
+		car_snd = AudioStreamPlayer3D.new()
+		car_snd.stream = tune
+		car_snd.position = Vector3(0, 2.0, 0)
+		car_snd.volume_db = -6.0
+		car_snd.unit_size = 6.0
+		car_snd.max_distance = 44.0
+		root_static.add_child(car_snd)
+		car_snd.play()
 
 func _tick_carousel(delta: float) -> void:
 	if car_root == null or won or lost or paused or liftoff_active:
 		return
 	var spd := 0.85 if _is_night() else 0.35
 	car_root.rotation.y += delta * spd
+	if car_snd != null:
+		car_snd.pitch_scale = 0.8 if _is_night() else 1.0
 	for i in car_horses.size():
 		var h := car_horses[i] as Node3D
 		h.position.y = 1.15 + sin(car_root.rotation.y * 3.0 + float(i) * 1.7) * 0.38
