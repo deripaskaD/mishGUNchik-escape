@@ -94,6 +94,13 @@ const MACHINES := [
 		"7 осколков — и зеркало скажет правду.",
 		"Погадать? С тебя улыбка."]},
 ]
+# ночные фишки по ночам (концепт §7): н4 зеркальца, н5 выход из зеркал, н6 прожектор
+var mtraps: Array = []           # [{node, pos, cd}]
+var _mirror_out_cd := 55.0
+var spot_node: SpotLight3D
+var spot_beam: MeshInstance3D
+var spot_ang := 0.0
+var _spot_hit_cd := 0.0
 var machine_cd := [0.0, 0.0, 0.0]
 var machine_line := [0, 0, 0]
 var machine_lamps: Array = []
@@ -546,6 +553,9 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--n6" in args:
+		clock = DAY_LEN * 5.62   # шестые сутки, ночь (nights считается из clock) — прожектор активен
+		spot_ang = PI * 0.5 - 0.42   # к моменту кадра луч смотрит на юг (в камеру --shottower)
 	if "--shotmach" in args:
 		_shot = true
 		player.global_position = Vector3(3.6, 1.6, 9.6)   # взгляд по умолчанию -Z — на робота
@@ -1447,6 +1457,120 @@ func _smoke(pos: Vector3, amount: int, lifetime: float, gravity: Vector3, smin: 
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.material_override = mat
 	add_child(sm)
+
+func _build_night_features() -> void:
+	# зеркальца-ловушки (активны с ночи 4): детерминированные позиции — стабильная регрессия
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4402
+	for i in 14:
+		var px := rng.randf_range(-0.72, 0.72) * WORLD
+		var pz := rng.randf_range(-0.72, 0.72) * WORLD
+		if Vector2(px, pz).length() < 22.0:
+			continue   # не у избы
+		var mi := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.5
+		cm.bottom_radius = 0.5
+		cm.height = 0.05
+		mi.mesh = cm
+		mi.position = Vector3(px, _terrain_h(px, pz) + 0.05, pz)
+		var mm := StandardMaterial3D.new()
+		mm.albedo_color = Color(0.8, 0.92, 1.0)
+		mm.metallic = 0.95
+		mm.roughness = 0.06
+		mm.emission_enabled = true
+		mm.emission = Color(0.5, 0.75, 1.0)
+		mm.emission_energy_multiplier = 0.25
+		mi.material_override = mm
+		mi.visible = false
+		add_child(mi)
+		mtraps.append({"node": mi, "pos": Vector3(px, 0, pz), "cd": 0.0})
+
+func _tick_night_features(delta: float) -> void:
+	if mtraps.is_empty() or won or lost or paused or liftoff_active:
+		return
+	var night := _is_night()
+	# н4+: зеркальца видны только ночью — наступил → вспышка, стан, смех Кривого
+	var traps_on := nights >= 4 and night
+	for t in mtraps:
+		var node := t["node"] as MeshInstance3D
+		if node.visible != traps_on:
+			node.visible = traps_on
+		t["cd"] = maxf(0.0, float(t["cd"]) - delta)
+		if traps_on and float(t["cd"]) <= 0.0 and stun <= 0.0:
+			var tp: Vector3 = t["pos"]
+			if Vector2(player.global_position.x - tp.x, player.global_position.z - tp.z).length() < 1.1:
+				t["cd"] = 30.0
+				stun = 0.9
+				_play(snd_claugh)
+				if catch_flash != null:
+					catch_flash.color = Color(0.85, 0.95, 1.0, 0.0)
+					flash_v = 0.65
+				if done_label != null and done_t <= 0.0:
+					done_label.add_theme_color_override("font_color", Color(0.7, 0.9, 1.0))
+					done_label.text = "Зеркальце-ловушка! Он услышал…"
+					done_t = 2.4
+	# н5+: Кривой «выходит из зеркала» рядом с игроком (в реальной игре, не у бота)
+	if nights >= 5 and night and wake <= 0.0 and not _autoplay:
+		_mirror_out_cd -= delta
+		if _mirror_out_cd <= 0.0 and timokha != null:
+			_mirror_out_cd = randf_range(45.0, 70.0)
+			var ang := randf() * TAU
+			var pp := player.global_position + Vector3(cos(ang), 0, sin(ang)) * 26.0
+			pp = _clamp_world(pp)
+			timokha.global_position = Vector3(pp.x, _terrain_h(pp.x, pp.z) + 1.0, pp.z)
+			_play(snd_claugh)
+			if catch_flash != null:
+				catch_flash.color = Color(0.6, 0.8, 1.0, 0.0)
+				flash_v = 0.4
+	# н6+: прожектор на вышке — луч кружит, поймал → сирена и Кривой мчится
+	if nights >= 6 and night:
+		if spot_node == null:
+			spot_node = SpotLight3D.new()
+			spot_node.position = Vector3(-135, _terrain_h(-135, 150) + 13.0, 150)
+			spot_node.spot_range = 80.0
+			spot_node.spot_angle = 7.0
+			spot_node.light_energy = 6.0
+			spot_node.light_color = Color(1.0, 0.95, 0.75)
+			add_child(spot_node)
+			spot_beam = MeshInstance3D.new()
+			var bm := CylinderMesh.new()
+			bm.top_radius = 0.4
+			bm.bottom_radius = 4.6
+			bm.height = 58.0
+			spot_beam.mesh = bm
+			var bmm := StandardMaterial3D.new()
+			bmm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			bmm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			bmm.albedo_color = Color(1.0, 0.95, 0.7, 0.34)
+			bmm.emission_enabled = true
+			bmm.emission = Color(1.0, 0.95, 0.7)
+			bmm.emission_energy_multiplier = 2.2
+			bmm.cull_mode = BaseMaterial3D.CULL_DISABLED
+			spot_beam.material_override = bmm
+			spot_beam.rotation.x = -PI * 0.5   # ось цилиндра вдоль -Z спота (узкий конец у лампы)
+			spot_beam.position.z = -29.0
+			spot_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			spot_node.add_child(spot_beam)
+		spot_node.visible = true
+		spot_ang += delta * 0.32
+		var dir := Vector3(cos(spot_ang), 0, sin(spot_ang))
+		spot_node.look_at(spot_node.position + dir * 40.0 + Vector3(0, -12.0, 0), Vector3.UP)
+		_spot_hit_cd = maxf(0.0, _spot_hit_cd - delta)
+		if _spot_hit_cd <= 0.0 and not _autoplay and timokha != null:
+			var to_p := player.global_position - spot_node.position
+			var flat := Vector2(to_p.x, to_p.z)
+			if flat.length() < 72.0 and absf(atan2(dir.z, dir.x) - atan2(flat.y, flat.x)) < 0.09:
+				_spot_hit_cd = 22.0
+				_play(snd_siren)
+				var mid := timokha.global_position.lerp(player.global_position, 0.55)
+				timokha.global_position = Vector3(mid.x, _terrain_h(mid.x, mid.z) + 1.0, mid.z)
+				if done_label != null:
+					done_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.3))
+					done_label.text = "ПРОЖЕКТОР! %s знает, где ты!" % _cname()
+					done_t = 2.6
+	elif spot_node != null:
+		spot_node.visible = false
 
 func _build_machines() -> void:
 	# три машины-квестодателя: жестяной робот, автомат газировки, будка-гадалка
@@ -3150,6 +3274,7 @@ void fragment() {
 	_box(self, Vector3(8, 0.3, 200), Vector3(2.6, 0.3, 16), m_log, false)
 	_build_balloon()
 	_build_machines()
+	_build_night_features()
 	if false:
 		var boat := MeshInstance3D.new()
 		var bm := BoxMesh.new()
@@ -5614,6 +5739,7 @@ func _process(delta: float) -> void:
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
 	_tick_liftoff(delta)
 	_tick_machines(delta)
+	_tick_night_features(delta)
 	if bal_parts_built >= 5 and bal_env != null and not liftoff_active:
 		var bb := sin(clock * 0.8) * 0.28
 		bal_env.position.y = BAL_POS.y + 6.6 + bb
