@@ -6,7 +6,7 @@ extends Node3D
 const CC := preload("res://scripts/proto3d/chaser_config.gd")   # СМЕННЫЙ МОДУЛЬ персонажа/бренда — вся замена маскота там
 
 const WORLD := 220.0          # полупролёт карты (440x440 м) — большой лес
-const TREES := 2400         # очень густой лес (на мобиле /3)
+const TREES := 3400         # плотный лес «99 ночей» (мобайл /3, веб /2)
 const TREE_SCALE := 5.2     # крупные GLB-деревья Kenney (густой высокий лес)
 const BORDER_TREES := 320   # плотная стена леса по периметру карты
 const CLEARING := 11.0        # радиус поляны у избы без деревьев (меньше → лес ближе к дому)
@@ -211,6 +211,7 @@ var snd_btn: Button
 var gfx_btn: Button
 var _muted := false
 var _yacht_announced := false
+var _ap_sub_target := false
 var _perf_test := false
 var _anim_probe := false
 var _warmup_t := 0.0        # веб: прогрев шейдеров после «Играть» (облёт камерой за ширмой)
@@ -385,6 +386,7 @@ func _ready() -> void:
 		get_viewport().scaling_3d_scale = 0.7   # рендер 3D в 70% → крупный прирост FPS (ретина рендерит ×2-3)
 	elif OS.has_feature("web"):
 		get_viewport().scaling_3d_scale = 0.8   # веб (WASM+WebGL) медленнее натива
+	_load_fonts()
 	_build_materials()
 	_build_environment()
 	if _has_diag("nosky"):
@@ -658,6 +660,20 @@ func _add_light(pos: Vector3, color: Color, energy: float, rng: float) -> OmniLi
 	l.omni_range = rng
 	add_child(l)
 	return l
+
+var font_bold: FontVariation
+var font_med: FontVariation
+
+func _load_fonts() -> void:
+	if not ResourceLoader.exists("res://art/fonts_comfortaa.ttf"):
+		return
+	var base: FontFile = load("res://art/fonts_comfortaa.ttf")
+	font_bold = FontVariation.new()
+	font_bold.base_font = base
+	font_bold.variation_opentype = {"wght": 700}
+	font_med = FontVariation.new()
+	font_med.base_font = base
+	font_med.variation_opentype = {"wght": 500}
 
 func _build_materials() -> void:
 	var gtex: Variant = load("res://art/textures/grass.png") if ResourceLoader.exists("res://art/textures/grass.png") else null
@@ -2402,6 +2418,31 @@ func _batch_mesh(mesh: Mesh, mat: Material, xform: Transform3D) -> void:
 		_mm_batches[key] = {"mesh": mesh, "override": mat, "xforms": []}
 	_mm_batches[key]["xforms"].append(xform)
 
+var _bm_blob: PlaneMesh
+var m_blob: StandardMaterial3D
+
+func _blob_shadow(pos: Vector3, r: float) -> void:
+	# «запечённая» тень-блоб: мягкое тёмное пятно под объектом (батчится, дёшево)
+	if _bm_blob == null:
+		_bm_blob = PlaneMesh.new()
+		_bm_blob.size = Vector2(1.0, 1.0)
+		m_blob = StandardMaterial3D.new()
+		m_blob.albedo_color = Color(0.05, 0.1, 0.05, 0.30)
+		m_blob.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m_blob.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		var grad := Gradient.new()
+		grad.set_color(0, Color(0, 0, 0, 1))
+		grad.set_color(1, Color(0, 0, 0, 0))
+		var gt := GradientTexture2D.new()
+		gt.gradient = grad
+		gt.fill = GradientTexture2D.FILL_RADIAL
+		gt.fill_from = Vector2(0.5, 0.5)
+		gt.fill_to = Vector2(0.5, 0.0)
+		gt.width = 64
+		gt.height = 64
+		m_blob.albedo_texture = gt
+	_batch_mesh(_bm_blob, m_blob, Transform3D(Basis.from_scale(Vector3(r, 1, r)), pos + Vector3(0, 0.06, 0)))
+
 func _yrot_scale(pos: Vector3, rot: float, s: float) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, rot) * Basis.from_scale(Vector3.ONE * s), pos)
 
@@ -2474,6 +2515,7 @@ func _tree(pos: Vector3, s: float, leafy: bool = false) -> void:
 		else:
 			ps99 = n99_pine[randi() % n99_pine.size()]
 		_batch_scene(ps99, _yrot_scale(pos, randf() * TAU, s99))
+		_blob_shadow(pos, s99 * (2.6 if roll < 0.30 and deep else 1.7))
 	elif CC.BLOCKY:
 		# фолбэк: роблокс-дерево из кубов (если nature99 не на месте)
 		var base := _yrot_scale(pos, randf() * TAU, s)
@@ -2520,6 +2562,7 @@ func _rock(pos: Vector3, s: float) -> void:
 				_rock_scenes.append(load(p))
 	if CC.BLOCKY and not n99_rocks.is_empty():
 		_batch_scene(n99_rocks[randi() % n99_rocks.size()], _yrot_scale(pos, randf() * TAU, s * 0.72))
+		_blob_shadow(pos, s * 0.9)
 	elif CC.BLOCKY:
 		_batch_mesh(_bm_cube, m_rock_v[randi() % m_rock_v.size()],
 			Transform3D(Basis(Vector3.UP, randf() * TAU) * Basis.from_scale(Vector3(1.5 * s, 1.0 * s, 1.3 * s)), pos + Vector3(0, 0.38 * s, 0)))
@@ -3249,8 +3292,37 @@ func _bushes(pos: Vector3, col: Color) -> void:
 		bush.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(bush)
 
+const COLLECT_IDS := ["wood1", "wood2", "herb1", "herb2", "berries", "mushroom", "apples", "potato"]
+
 func _add_quest(id: String, pos: Vector3, label: String, kind: String) -> void:
 	quests.append({"id": id, "pos": pos, "label": label, "kind": kind, "done": false, "prog": 0.0})
+	if id in COLLECT_IDS:
+		# сбор: 3 светящиеся точки вокруг центра — подойди к каждой (разнообразие вместо «постой 3 сек»)
+		var subs: Array = []
+		for i in 3:
+			var a := float(i) * TAU / 3.0 + randf_range(-0.5, 0.5)
+			var r := randf_range(4.0, 6.2)
+			var sp := pos + Vector3(cos(a) * r, 0, sin(a) * r)
+			sp.y = _terrain_h(sp.x, sp.z)
+			var mk := MeshInstance3D.new()
+			var sm := SphereMesh.new()
+			sm.radius = 0.24
+			sm.height = 0.48
+			mk.mesh = sm
+			mk.position = sp + Vector3(0, 1.0, 0)
+			mk.material_override = _emissive_mat(Color(1.0, 0.9, 0.4), Color(1.0, 0.85, 0.3), 2.2)
+			add_child(mk)
+			var st := MeshInstance3D.new()
+			var stc := CylinderMesh.new()
+			stc.top_radius = 0.045
+			stc.bottom_radius = 0.045
+			stc.height = 1.0
+			st.mesh = stc
+			st.position = sp + Vector3(0, 0.5, 0)
+			st.material_override = _mat(Color(0.5, 0.4, 0.25))
+			add_child(st)
+			subs.append({"pos": sp, "done": false, "node": mk, "post": st})
+		quests[quests.size() - 1]["subs"] = subs
 	# маяк-столб света (видно в тумане)
 	var beam := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
@@ -3268,6 +3340,7 @@ func _add_quest(id: String, pos: Vector3, label: String, kind: String) -> void:
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(beam)
 	quests[quests.size() - 1]["beam_mat"] = bmat
+	quests[quests.size() - 1]["beam_node"] = beam
 	# плавающая надпись
 	var l := Label3D.new()
 	l.text = label
@@ -3278,6 +3351,7 @@ func _add_quest(id: String, pos: Vector3, label: String, kind: String) -> void:
 	l.modulate = Color(1, 0.95, 0.6)
 	l.no_depth_test = true
 	add_child(l)
+	quests[quests.size() - 1]["label_node"] = l
 
 func _build_rain() -> void:
 	rain = GPUParticles3D.new()
@@ -3556,6 +3630,8 @@ void fragment() {
 	quest_mini.offset_top = vp.y * 0.5 + 58
 	quest_mini.offset_bottom = vp.y * 0.5 + 88
 	quest_mini.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if font_med != null:
+		quest_mini.add_theme_font_override("font", font_med)
 	quest_mini.add_theme_font_size_override("font_size", 17)
 	quest_mini.add_theme_color_override("font_color", Color(1.0, 0.92, 0.6))
 	quest_mini.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
@@ -3928,6 +4004,8 @@ func _build_title() -> void:
 	t1.offset_top = vp.y * 0.14
 	t1.offset_bottom = vp.y * 0.14 + 70
 	t1.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if font_bold != null:
+		t1.add_theme_font_override("font", font_bold)
 	t1.add_theme_font_size_override("font_size", 56)
 	t1.add_theme_color_override("font_color", Color(1.0, 0.9, 0.45))
 	t1.add_theme_color_override("font_outline_color", Color(0.25, 0.1, 0.05))
@@ -4124,10 +4202,18 @@ func _build_custom() -> void:
 	t.add_theme_constant_override("outline_size", 9)
 	t.text = "ПЕРСОНАЖ"
 	custom_root.add_child(t)
-	# живое превью (свой мир, вращается)
+	# превью (свой мир); вращается ДРАГОМ: зажми мышь/палец и веди в сторону
 	var svc := SubViewportContainer.new()
 	svc.position = Vector2(vp.x * 0.13, 108)
 	svc.size = Vector2(300, 430)
+	svc.mouse_filter = Control.MOUSE_FILTER_STOP
+	svc.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventScreenDrag:
+			if preview_fig != null:
+				preview_fig.rotation.y += (ev as InputEventScreenDrag).relative.x * 0.012
+		elif ev is InputEventMouseMotion and (ev as InputEventMouseMotion).button_mask & MOUSE_BUTTON_MASK_LEFT:
+			if preview_fig != null:
+				preview_fig.rotation.y += (ev as InputEventMouseMotion).relative.x * 0.012)
 	custom_root.add_child(svc)
 	var sv := SubViewport.new()
 	sv.size = Vector2i(300, 430)
@@ -4495,6 +4581,8 @@ func _touch_button(root: Control, text: String, pos: Vector2, size: Vector2, is_
 func _style_button(b: Button, base: Color, fsize: int = 24) -> void:
 	# единый детский стиль кнопок: скруглённые, цветные, с обводкой + звук клика
 	b.pressed.connect(func(): _play(snd_click))
+	if font_bold != null:
+		b.add_theme_font_override("font", font_bold)
 	b.add_theme_font_size_override("font_size", fsize)
 	b.add_theme_color_override("font_color", Color(1, 1, 1))
 	b.add_theme_color_override("font_hover_color", Color(1, 1, 1))
@@ -4598,8 +4686,11 @@ func _update_beacons() -> void:
 			continue
 		var m: StandardMaterial3D = q["beam_mat"]
 		if q["done"]:
-			m.emission = Color(0.3, 0.8, 0.35)
-			m.emission_energy_multiplier = 0.35
+			if q.has("beam_node"):
+				(q["beam_node"] as Node3D).visible = false   # выполненное — исчезает с карты
+			if q.has("label_node"):
+				(q["label_node"] as Node3D).visible = false
+			continue
 		elif q["id"] == tid:
 			m.emission = Color(1.0, 0.85, 0.25)
 			m.emission_energy_multiplier = 1.8 + sin(clock * 5.5) * 1.1
@@ -4625,6 +4716,9 @@ func _update_radar() -> void:
 	for i in quests.size():
 		var q = quests[i]
 		var d: Panel = radar_dots[i]
+		if q["done"]:
+			d.visible = false   # выполненное — долой с миникарты
+			continue
 		var col := Color(0.95, 0.85, 0.2)
 		if q["done"]:
 			col = Color(0.3, 0.8, 0.35)
@@ -4825,8 +4919,7 @@ func _process(delta: float) -> void:
 		if _tut_t <= 0.0:
 			tutorial_label.visible = false
 	_update_compass()   # стрелка крутится каждый кадр — плавно (не как текст HUD на троттлинге)
-	if custom_root != null and custom_root.visible and preview_fig != null:
-		preview_fig.rotation.y += delta * 0.9   # живое превью вращается
+	# превью персонажа статично: вращение — только зажатием (мышь/палец) по области превью
 	if qring != null and qring.visible:
 		qring.queue_redraw()   # кольцо прогресса тоже плавное на мобиле
 	_hud_acc += delta
@@ -5264,6 +5357,28 @@ func _update_quests(delta: float) -> void:
 	for q in quests:
 		if q["done"]:
 			continue
+		if q.has("subs"):
+			# сбор: подойди к каждой светящейся точке
+			var got := 0
+			for sub in q["subs"]:
+				if sub["done"]:
+					got += 1
+					continue
+				var d2: Vector3 = player.global_position - (sub["pos"] as Vector3)
+				if Vector2(d2.x, d2.z).length() < 1.9:
+					sub["done"] = true
+					got += 1
+					(sub["node"] as Node3D).visible = false
+					(sub["post"] as Node3D).visible = false
+					_play(snd_ding)
+					if catch_flash != null:
+						catch_flash.color = Color(0.2, 1.0, 0.4, 0.0)
+						flash_v = 0.25
+			q["prog"] = float(got) / 3.0
+			if got >= 3:
+				q["prog"] = 1.0
+				_finish_quest(q)
+			continue
 		var to: Vector3 = player.global_position - q["pos"]
 		if Vector2(to.x, to.z).length() < 3.2:
 			# варка требует 2 дрова + 2 травы; яхта — после всех остальных
@@ -5273,42 +5388,45 @@ func _update_quests(delta: float) -> void:
 				continue
 			q["prog"] += delta / 3.6
 			if q["prog"] >= 1.0:
-				q["done"] = true
-				quests_done += 1
-				if q["kind"] == "wood":
-					wood += 1
-				elif q["kind"] == "herb":
-					herbs += 1
-				if q["kind"] == "yacht":
-					won = true
-					_play(snd_win)
-					wins_total += 1
-					best_nights = maxi(best_nights, nights)
-					_save_game()
-					if analytics != null and not _autoplay:
-						analytics.log_event("game_win", {"nights": nights, "caught": caught, "seconds": int(clock)})
-					Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # курсор для кнопки «Играть снова»
-				else:
-					_play(snd_ding)
-					if catch_flash != null:
-						catch_flash.color = Color(0.2, 1.0, 0.4, 0.0)
-						flash_v = 0.5
-					_reveal_note()   # дневное дело → раскрыть следующую записку лора
-					if analytics != null and not _autoplay:
-						analytics.log_event("quest_done", {"id": q["id"], "done_count": quests_done, "night": nights})
-					if ads != null and not _autoplay:
-						ads.show_interstitial("quest_done")
-					if done_label != null:
-						done_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.55))
-						done_label.text = str(q["label"]) + " — готово!"
-						done_t = 1.3
-						# кульминация: все дела готовы → яхта открыта
-						if not _yacht_announced and quests_done >= quests.size() - 1:
-							_yacht_announced = true
-							done_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
-							done_label.text = "Все дела готовы! Чини яхту и беги!"
-							done_t = 2.8
-							_start_final_chase()
+				_finish_quest(q)
+
+func _finish_quest(q: Dictionary) -> void:
+	q["done"] = true
+	quests_done += 1
+	if q["kind"] == "wood":
+		wood += 1
+	elif q["kind"] == "herb":
+		herbs += 1
+	if q["kind"] == "yacht":
+		won = true
+		_play(snd_win)
+		wins_total += 1
+		best_nights = maxi(best_nights, nights)
+		_save_game()
+		if analytics != null and not _autoplay:
+			analytics.log_event("game_win", {"nights": nights, "caught": caught, "seconds": int(clock)})
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # курсор для кнопки «Играть снова»
+	else:
+		_play(snd_ding)
+		if catch_flash != null:
+			catch_flash.color = Color(0.2, 1.0, 0.4, 0.0)
+			flash_v = 0.5
+		_reveal_note()   # дневное дело → раскрыть следующую записку лора
+		if analytics != null and not _autoplay:
+			analytics.log_event("quest_done", {"id": q["id"], "done_count": quests_done, "night": nights})
+		if ads != null and not _autoplay:
+			ads.show_interstitial("quest_done")
+		if done_label != null:
+			done_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.55))
+			done_label.text = str(q["label"]) + " — готово!"
+			done_t = 1.3
+			# кульминация: все дела готовы → яхта открыта
+			if not _yacht_announced and quests_done >= quests.size() - 1:
+				_yacht_announced = true
+				done_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
+				done_label.text = "Все дела готовы! Чини яхту и беги!"
+				done_t = 2.8
+				_start_final_chase()
 
 func _set_crosshair_size(s: float) -> void:
 	if crosshair == null:
@@ -5577,7 +5695,15 @@ func _update_compass() -> void:
 	compass_on = true
 	if quest_mini != null:
 		var dm := int(d3.length())
-		quest_mini.text = "%s · %d м" % [tq["label"], dm] if dm > 4 else str(tq["label"])
+		var extra := ""
+		for q2 in quests:
+			if str(q2["id"]) == str(tq.get("id", "")) and q2.has("subs"):
+				var got2 := 0
+				for sub2 in q2["subs"]:
+					if sub2["done"]:
+						got2 += 1
+				extra = " · %d/3" % got2
+		quest_mini.text = ("%s · %d м%s" % [tq["label"], dm, extra]) if dm > 4 else (str(tq["label"]) + extra)
 		quest_mini.visible = show
 
 func _refresh_hud() -> void:
@@ -5647,6 +5773,9 @@ func _refresh_hud() -> void:
 			Performance.get_monitor(Performance.TIME_NAVIGATION_PROCESS) * 1000.0]   # веб-диагностика
 	hud.text = phase
 	hud.add_theme_color_override("font_color", pcol)
+	if font_bold != null and hud.get_theme_font("font") != font_bold:
+		hud.add_theme_font_override("font", font_bold)
+		hud.add_theme_font_size_override("font_size", 26)
 	# верх-центр: квест-зона (компас к цели + текущее дело), под прогресс-баром
 	var qp := ""
 	var tq := _nearest_target()
@@ -5808,12 +5937,23 @@ func _autoplay_move(delta: float) -> void:
 		for q in quests:
 			if q["id"] == qid:
 				tp = q["pos"]
+				if q.has("subs"):
+					var best := 1e9
+					for sub in q["subs"]:
+						if sub["done"]:
+							continue
+						var dd2: float = player.global_position.distance_to(sub["pos"])
+						if dd2 < best:
+							best = dd2
+							tp = sub["pos"]
+							_ap_sub_target = true   # точка сбора: подойти вплотную (радиус 1.9)
 	# ── маршрутизация вокруг ИЗБЫ (стены-коллайдеры!): прямая через (0,0) клинила бота внутри навсегда ──
 	var pp := Vector2(player.global_position.x, player.global_position.z)
 	var tt := Vector2(tp.x, tp.z)
 	var p_in := absf(pp.x) < 7.0 and absf(pp.y) < 7.0
 	var t_in := absf(tt.x) < 7.0 and absf(tt.y) < 7.0
-	var wp_mode := false   # промежуточный вейпоинт → малый стоп-радиус (2.2м замораживал бота у двери)
+	var wp_mode := _ap_sub_target   # суб-точка сбора или вейпоинт → малый стоп-радиус
+	_ap_sub_target = false
 	if t_in and not p_in:
 		# цель внутри (котёл): выровняться перед дверью (+Z), затем сквозь дверной проём по оси
 		wp_mode = true
