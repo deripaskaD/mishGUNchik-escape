@@ -114,6 +114,9 @@ var car_root: Node3D
 var car_horses: Array = []
 var _car_hit_cd := 0.0
 var car_snd: AudioStreamPlayer3D
+var _sneak_t := 0.0            # н2+ стелс: неточная цель при тихой ходьбе
+var _sneak_target := Vector3.ZERO
+var _sneak_hint := false
 const FERRIS_POS := Vector3(150.0, 0.0, 160.0)   # колесо обозрения (зона 6)
 var ferris_root: Node3D
 var ferris_cabins: Array = []
@@ -1864,6 +1867,12 @@ func _tick_night_features(delta: float) -> void:
 					done_label.add_theme_color_override("font_color", Color(0.7, 0.9, 1.0))
 					done_label.text = "Зеркальце-ловушка! Он услышал…"
 					done_t = 2.4
+	# обучение стелсу: один раз, в начале ночи 2
+	if nights == 2 and night and not _sneak_hint and not _autoplay and done_label != null and done_t <= 0.0:
+		_sneak_hint = true
+		done_label.add_theme_color_override("font_color", Color(0.7, 0.9, 1.0))
+		done_label.text = "Иди ТИХО (без бега) — он потеряет твой след!"
+		done_t = 4.0
 	# н5+: Кривой «выходит из зеркала» рядом с игроком (в реальной игре, не у бота)
 	if nights >= 5 and night and wake <= 0.0 and not _autoplay:
 		_mirror_out_cd -= delta
@@ -6643,6 +6652,17 @@ func _move_timokha(delta: float) -> void:
 		var dist := player.global_position.distance_to(timokha.global_position)
 		last_seen = player.global_position
 		target = player.global_position
+		# н2+ СТЕЛС: тихая ходьба вне прямой видимости → Кривой идёт к размытому следу
+		# (обновляется раз в 3 с); бег он «слышит» всегда — точная цель
+		var moving_fast := Vector2(player.velocity.x, player.velocity.z).length() > SPEED + 0.6
+		if nights >= 2 and not final_chase and not _autoplay and dist > 14.0 and not _has_los() and not moving_fast:
+			_sneak_t -= delta
+			if _sneak_t <= 0.0 or _sneak_target == Vector3.ZERO:
+				_sneak_t = 3.0
+				_sneak_target = player.global_position + Vector3(randf_range(-9.0, 9.0), 0, randf_range(-9.0, 9.0))
+			target = _clamp_world(_sneak_target)
+		else:
+			_sneak_t = 0.0
 		var esc := 0.82 if nights <= 1 else (1.0 if nights < 6 else 1.12)   # ночь 1 проходима всеми; 6+ злее
 		spd = TIMOKHA_NIGHT * 1.22 if final_chase else TIMOKHA_NIGHT * esc
 		tk_aggro = _has_los()
