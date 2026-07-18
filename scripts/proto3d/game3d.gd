@@ -69,6 +69,12 @@ var flash_unlocked := false   # P: фонарик — награда за Ноч
 # ═══ ОСКОЛКИ ЗЕРКАЛА (концепт §5-6): 7 секреток по острову, счёт между сессиями ═══
 var shards_found: Array = []      # индексы собранных
 var shard_nodes: Array = []       # [{idx, pos, node}]
+var mirror_built := false      # Главное Зеркало собрано (истинная концовка)
+var true_end_run := false      # текущая победа = истинная концовка
+var true_end_seen := false     # сейв: истинная концовка открыта (значок на тайтле)
+var mirror_prog := 0.0
+var mirror_glass: MeshInstance3D
+const MIRROR_POS := Vector3(0.0, 0, -7.6)   # рама за избой
 const SHARD_SPOTS := [
 	Vector3(4.0, 0, 197.0),       # №1 пирс — лежит открыто (обучение)
 	Vector3(-106.0, 0, -126.0),   # №2 у мельницы
@@ -76,7 +82,7 @@ const SHARD_SPOTS := [
 	Vector3(-146.5, 0, 90.0),     # №4 кладбище
 	Vector3(-131.5, 0, 147.0),    # №5 у вышки
 	Vector3(212.0, 0, -212.0),    # №6 дальняя глушь (труднонаходимый — топливо теорий)
-	Vector3(0.0, 0, -6.5),        # №7 внутри избы, за котлом
+	Vector3(-3.1, 0, -3.6),       # №7 внутри избы, в углу за котлом
 ]
 var _birds_t := 5.0
 var snd_thunder: AudioStreamPlayer
@@ -508,6 +514,14 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--shotmirror" in args:
+		_shot = true
+		player.global_position = Vector3(0, 1.6, -11.5)   # за избой, лицом к раме Главного Зеркала
+		player.rotate_y(PI)   # дефолт взгляда -Z → разворот на раму (+Z)
+		if "--full" in args:
+			shards_found = [0, 1, 2, 3, 4, 5, 6]   # проверка сборки при 7/7
+			player.global_position = Vector3(0, 1.6, -9.4)   # вплотную — hold завершится за время кадра
+			_shot_delay = 4.6   # кадр в момент «Кривой смотрит в зеркало» (3с hold + 1.6с сцены)
 	if "--shotcamp" in args:
 		_shot = true
 		player.global_position = HUTS[0] + Vector3(0, 1.6, 8.0)   # фронт хижины в упор (двери/окна)
@@ -1292,6 +1306,22 @@ func _build_cabin() -> void:
 	# КРЫША: один модуль roof-gable на всю избу (конёк вдоль X), фронтоны-призмы по ±X
 	_batch_scene(_kit("roof-gable"), Transform3D(Basis.from_scale(Vector3(8.9, 4.6, 9.16)), Vector3(0, 3.0, 0)), m_roof)
 
+	# ГЛАВНОЕ ЗЕРКАЛО (истинная концовка): пустая рама за избой; заполняется при 7/7 осколках
+	var mf := _mat(Color(0.42, 0.30, 0.16))
+	_box(self, MIRROR_POS + Vector3(-1.03, 1.5, 0), Vector3(0.16, 3.0, 0.16), mf, false)
+	_box(self, MIRROR_POS + Vector3(1.03, 1.5, 0), Vector3(0.16, 3.0, 0.16), mf, false)
+	_box(self, MIRROR_POS + Vector3(0, 3.06, 0), Vector3(2.22, 0.16, 0.16), mf, false)
+	_box(self, MIRROR_POS + Vector3(0, 0.04, 0), Vector3(2.22, 0.16, 0.16), mf, false)
+	mirror_glass = MeshInstance3D.new()
+	var mg := BoxMesh.new()
+	mg.size = Vector3(1.9, 2.94, 0.05)
+	mirror_glass.mesh = mg
+	mirror_glass.position = MIRROR_POS + Vector3(0, 1.51, 0)
+	var mgm := StandardMaterial3D.new()
+	mgm.albedo_color = Color(0.08, 0.1, 0.14)   # пустота (до сборки)
+	mgm.roughness = 0.35
+	mirror_glass.material_override = mgm
+	add_child(mirror_glass)
 	# балка-перемычка над воротами (проём 3×3 до крыши)
 	_box(self, Vector3(0, 3.05, half - 0.05), Vector3(3.2, 0.35, 0.42), m_log, false)
 	# тёплый свет внутри — ночью льётся из двери и окон; фонари у ворот загораются ночью
@@ -1984,8 +2014,8 @@ func _update_shards(delta: float) -> void:
 			if done_label != null:
 				done_label.add_theme_color_override("font_color", Color(0.7, 0.92, 1.0))
 				if shards_found.size() >= 7:
-					done_label.text = "ВСЕ 7 ОСКОЛКОВ! Зеркало можно собрать… (скоро)"
-					done_t = 3.4
+					done_label.text = "ВСЕ 7 ОСКОЛКОВ! Собери Главное Зеркало ЗА ИЗБОЙ!"
+					done_t = 3.8
 				else:
 					done_label.text = "Осколок зеркала! (%d/7)" % shards_found.size()
 					done_t = 2.2
@@ -4127,6 +4157,7 @@ func _load_save() -> void:
 	flash_unlocked = bool(data.get("flash", false))
 	if data.get("shards", []) is Array:
 		shards_found = data.get("shards", [])
+	true_end_seen = bool(data.get("true_end", false))
 	wins_total = int(data.get("wins", 0))
 	caught_total = int(data.get("tot_caught", 0))
 	best_nights = int(data.get("best_nights", 0))
@@ -4151,7 +4182,7 @@ func _save_game() -> void:
 		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights, "photo_chosen": photo_chosen,
 		"face_dx": face_dx, "face_dy": face_dy, "face_zoom": face_zoom,
 		"col_body": col_body.to_html(false), "col_legs": col_legs.to_html(false), "hat": hat_id,
-		"chaser_name": chaser_name, "streamer": streamer_mode, "promos": promo_unlocked, "flash": flash_unlocked, "shards": shards_found}))
+		"chaser_name": chaser_name, "streamer": streamer_mode, "promos": promo_unlocked, "flash": flash_unlocked, "shards": shards_found, "true_end": true_end_seen}))
 		f.close()
 
 func _load_custom_photo() -> void:
@@ -4358,6 +4389,8 @@ func _build_title() -> void:
 	rec.add_theme_color_override("font_outline_color", Color(0.2, 0.1, 0.05, 0.8))
 	rec.add_theme_constant_override("outline_size", 6)
 	rec.text = "Мой рекорд: Ночь %d · Осколки %d/7 · против %s" % [maxi(best_nights, 1), shards_found.size(), _cname().to_upper()]
+	if true_end_seen:
+		rec.text += "  ✦"
 	title_root.add_child(rec)
 	if wins_total > 0 or caught_total > 0:
 		var rec2 := Label.new()
@@ -4899,7 +4932,10 @@ func _save_trophy() -> void:
 	t1.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3) if lost else Color(0.5, 1.0, 0.6))
 	t1.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	t1.add_theme_constant_override("outline_size", 10)
-	t1.text = ("МЕНЯ ПОЙМАЛ %s!" % _cname().to_upper()) if lost else ("%s МЕНЯ НЕ ПОЙМАЛ!" % _cname().to_upper())
+	if true_end_run:
+		t1.text = "Я СПАС %s!" % _cname().to_upper()
+	else:
+		t1.text = ("МЕНЯ ПОЙМАЛ %s!" % _cname().to_upper()) if lost else ("%s МЕНЯ НЕ ПОЙМАЛ!" % _cname().to_upper())
 	root.add_child(t1)
 	var t2 := Label.new()
 	t2.size = Vector2(720, 60)
@@ -5338,6 +5374,7 @@ func _process(delta: float) -> void:
 			cam.position = Vector3(bx, 0.7 + by, 0)
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
+	_tick_mirror(delta)
 	_tick_warmup(delta)
 	_update_critters(delta)
 	_event_director(delta)
@@ -5417,10 +5454,11 @@ func _process(delta: float) -> void:
 		if _anim_probe:
 			if _shot_t > 1.2 + float(_anim_frames) * 0.5:
 				_save_anim_frame()
-		elif _shot_t > 1.2:
+		elif _shot_t > _shot_delay:
 			_save_shot()
 
 var _anim_frames := 0
+var _shot_delay := 1.2   # --shotmirror --full ставит больше (ждём сцену сборки)
 
 func _save_anim_frame() -> void:
 	var img := get_viewport().get_texture().get_image()
@@ -5601,6 +5639,57 @@ func _begin_warmup() -> void:
 	warmup_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
 	warmup_label.text = "Готовим остров…"
 	warmup_root.add_child(warmup_label)
+
+func _tick_mirror(delta: float) -> void:
+	# истинная концовка: собери 7 осколков → собери зеркало за избой → покажи Кривому отражение
+	if mirror_built or won or lost or paused or _autoplay or shards_found.size() < 7:
+		return
+	var d := player.global_position - (MIRROR_POS + Vector3(0, 1, 0))
+	if Vector2(d.x, d.z).length() < 2.6:
+		mirror_prog += delta / 3.0
+		if quest_prompt != null:
+			quest_prompt.visible = true
+			quest_prompt.text = "Собираю Главное Зеркало… %d%%" % int(mirror_prog * 100.0)
+			quest_prompt.add_theme_color_override("font_color", Color(0.7, 0.92, 1.0))
+		if mirror_prog >= 1.0:
+			_true_ending()
+	else:
+		mirror_prog = maxf(0.0, mirror_prog - delta)
+
+func _true_ending() -> void:
+	mirror_built = true
+	# зеркало оживает
+	var mgm := mirror_glass.material_override as StandardMaterial3D
+	mgm.albedo_color = Color(0.8, 0.95, 1.0)
+	mgm.metallic = 1.0
+	mgm.roughness = 0.03
+	mgm.emission_enabled = true
+	mgm.emission = Color(0.6, 0.88, 1.0)
+	mgm.emission_energy_multiplier = 0.55   # мягкое свечение — не засвечивать в белый
+	_play(snd_ding)
+	# Кривой появляется В зеркале (он из зеркала и пришёл) — в плоскости стекла, лицом к игроку
+	timokha.global_position = MIRROR_POS + Vector3(0, 1.0, 0)
+	var lp := player.global_position
+	timokha.look_at(Vector3(lp.x, timokha.global_position.y, lp.z), Vector3.UP)
+	if done_label != null:
+		done_label.add_theme_color_override("font_color", Color(0.7, 0.92, 1.0))
+		done_label.text = "%s смотрит из зеркала… и узнаёт себя" % _cname()
+		done_t = 2.6
+	await get_tree().create_timer(2.6).timeout
+	if catch_flash != null:
+		catch_flash.color = Color(1.0, 1.0, 1.0, 0.0)
+		flash_v = 1.0
+	_play(snd_sneeze)
+	_play(snd_win)
+	true_end_run = true
+	true_end_seen = true
+	won = true
+	wins_total += 1
+	best_nights = maxi(best_nights, nights)
+	_save_game()
+	if analytics != null and not _autoplay:
+		analytics.log_event("true_ending", {"nights": nights})
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 func _tick_warmup(_delta: float) -> void:
 	if _warmup_frames <= 0:
@@ -6266,7 +6355,10 @@ func _refresh_hud() -> void:
 			win_overlay.visible = true
 			win_label.visible = true
 			win_label.add_theme_color_override("font_color", Color(0.5, 1.0, 0.6))
-			win_label.text = "СБЕЖАЛ НА ЯХТЕ!\n\nНочей пережито: %d\nПойман: %d раз\nВремя: %d:%02d" % [nights, caught, int(clock) / 60, int(clock) % 60]
+			if true_end_run:
+				win_label.text = "ИСТИННАЯ КОНЦОВКА!\n\nТы собрал зеркало и спас друга.\nВы уплыли ВДВОЁМ.\n\n…а в пустой комнате треснувшее зеркало\nсмеётся само. Кривых было больше…"
+			else:
+				win_label.text = "СБЕЖАЛ НА ЯХТЕ!\n\nНочей пережито: %d\nПойман: %d раз\nВремя: %d:%02d" % [nights, caught, int(clock) / 60, int(clock) % 60]
 		if restart_btn != null:
 			restart_btn.visible = true
 		if win_quit_btn != null:
