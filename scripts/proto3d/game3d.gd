@@ -12,7 +12,7 @@ const BORDER_TREES := 320   # плотная стена леса по перим
 const CLEARING := 11.0        # радиус поляны у избы без деревьев (меньше → лес ближе к дому)
 const HUTS := [Vector3(82, 0, -72), Vector3(136, 0, 92), Vector3(-165, 0, -50), Vector3(22, 0, 176)]
 # ориентиры-структуры — деревья оставляют вокруг них полянку (иначе густой лес их заслоняет)
-const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150), Vector3(30, 0, 116), Vector3(150, 0, 160), Vector3(-70, 0, -60)]
+const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150), Vector3(30, 0, 116), Vector3(150, 0, 160), Vector3(-70, 0, -60), Vector3(95, 0, -135)]
 const LANDMARK_CLEAR := 9.0
 const SPEED := 6.2
 const SPRINT := 9.6
@@ -570,6 +570,9 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--shotmaze" in args:
+		_shot = true
+		player.global_position = Vector3(95.0, _terrain_h(95.0, -122.0) + 1.6, -122.0)
 	if "--shotcirc" in args:
 		_shot = true
 		player.global_position = Vector3(-63.0, _terrain_h(-63.0, -47.0) + 1.6, -47.0)
@@ -1657,6 +1660,57 @@ func _build_ferris() -> void:
 		_box(seat, Vector3(0, -0.85, 0), Vector3(1.0, 0.8, 0.9), cm2, false)
 		_box(seat, Vector3(0, -0.38, 0.42), Vector3(1.0, 0.5, 0.08), cm2, false)
 		ferris_cabins.append(seat)
+
+func _build_maze() -> void:
+	# зеркальный лабиринт (зона 5): блоки-зеркала, ночью мерцают; в центре — «двойник»
+	const MZ := Vector3(95.0, 0.0, -135.0)
+	var by := _terrain_h(MZ.x, MZ.z)
+	var rows := [
+		"#######",
+		"#.....#",
+		"#.###.#",
+		"#.#.#.#",
+		"#.#.#.#",
+		"#.....#",
+		"###.###",
+	]
+	var cell := 2.3
+	var mirror_m := StandardMaterial3D.new()
+	mirror_m.albedo_color = Color(0.6, 0.72, 0.85)
+	mirror_m.metallic = 0.8
+	mirror_m.roughness = 0.25
+	mirror_m.emission_enabled = true
+	mirror_m.emission = Color(0.5, 0.75, 1.0)
+	mirror_m.emission_energy_multiplier = 0.12
+	for r in rows.size():
+		for c in rows[r].length():
+			if rows[r][c] != "#":
+				continue
+			var wx := MZ.x + (float(c) - 3.0) * cell
+			var wz := MZ.z + (float(r) - 3.0) * cell
+			var blk := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(cell, 2.7, cell)
+			blk.mesh = bm
+			blk.position = Vector3(wx, by + 1.35, wz)
+			blk.material_override = mirror_m
+			add_child(blk)
+			var sb := StaticBody3D.new()
+			var cs := CollisionShape3D.new()
+			var shp := BoxShape3D.new()
+			shp.size = bm.size
+			cs.shape = shp
+			sb.add_child(cs)
+			blk.add_child(sb)
+	# в центре — зеркальный «двойник»: колонна-капсула, «кто-то стоит»
+	var twin := MeshInstance3D.new()
+	var tm := CapsuleMesh.new()
+	tm.radius = 0.42
+	tm.height = 1.9
+	twin.mesh = tm
+	twin.position = Vector3(MZ.x, by + 0.95, MZ.z)
+	twin.material_override = mirror_m
+	add_child(twin)
 
 func _build_circus() -> void:
 	# цирк-шатёр (зона 3): полосатый конус-купол, круг стен с входом с юга, флажок
@@ -3578,6 +3632,7 @@ void fragment() {
 	_build_carousel()
 	_build_ferris()
 	_build_circus()
+	_build_maze()
 	if false:
 		var boat := MeshInstance3D.new()
 		var bm := BoxMesh.new()
