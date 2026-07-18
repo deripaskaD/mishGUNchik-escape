@@ -53,6 +53,9 @@ var snd_crickets: AudioStreamPlayer
 var snd_owl: AudioStreamPlayer
 var _owl_t := 8.0
 var snd_birds: AudioStreamPlayer
+var snd_sneeze: AudioStreamPlayer
+var snd_chant: AudioStreamPlayer
+var flash_unlocked := false   # P: фонарик — награда за Ночь 1 (навсегда)
 var _birds_t := 5.0
 var snd_thunder: AudioStreamPlayer
 var snd_dread: AudioStreamPlayer
@@ -212,6 +215,20 @@ var gfx_btn: Button
 var _muted := false
 var _yacht_announced := false
 var _ap_sub_target := false
+var chaser_name := ""       # кастомное имя монстра (K-V1, виральность); пусто = CC.NAME
+var streamer_mode := false  # R: отключает interstitial на время записи
+var promo_unlocked: Array = []   # N: активированные промокоды
+const BAD_WORDS := ["хуй", "хуё", "хуе", "пизд", "ебал", "ебан", "ёбан", "еба", "бля", "сука", "суки", "гандон", "мудак", "долбо", "дебил", "уебок", "педик", "лох "]
+
+func _cname() -> String:
+	return chaser_name if chaser_name != "" else CC.NAME
+
+func _name_ok(n: String) -> bool:
+	var low := n.to_lower()
+	for w in BAD_WORDS:
+		if low.contains(w):
+			return false
+	return n.strip_edges().length() >= 2 and n.length() <= 14
 var _perf_test := false
 var _anim_probe := false
 var _warmup_t := 0.0        # веб: прогрев шейдеров после «Играть» (облёт камерой за ширмой)
@@ -247,6 +264,7 @@ var win_label: Label
 var title_root: Control   # тайтл-экран (Играть/Графика/Дневник) — показывается на старте
 var custom_photo: Texture2D   # пользовательское фото персонажа (user://custom_photo.png)
 var choice_root: Control      # стартовый выбор: «фото друга» или стандартный персонаж
+var name_edit: LineEdit       # ввод имени монстра (K-V1)
 # ── кастомизация персонажа (экран «Персонаж») ──
 var custom_root: Control
 var face_dx := 0.0            # сдвиг фото по кубу (доли региона)
@@ -3527,7 +3545,7 @@ void fragment() {
 	chase_banner.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
 	chase_banner.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	chase_banner.add_theme_constant_override("outline_size", 8)
-	chase_banner.text = "БЕГИ К ЯХТЕ — %s ГОНИТСЯ!" % CC.NAME.to_upper()
+	chase_banner.text = "БЕГИ К ЯХТЕ — %s ГОНИТСЯ!" % _cname().to_upper()
 	chase_banner.visible = false
 	layer.add_child(chase_banner)
 	# кнопка «Фонарик (реклама)» — появляется на ~12с при наступлении ночи
@@ -3824,7 +3842,7 @@ void fragment() {
 func _reveal_note() -> void:
 	if lore_idx >= LORE.size():
 		return
-	var txt: String = LORE[lore_idx].format({"N": CC.NAME})
+	var txt: String = LORE[lore_idx].format({"N": _cname()})
 	lore_found.append(txt)
 	lore_idx += 1
 	if note_panel != null and note_label != null:
@@ -3841,7 +3859,7 @@ func _toggle_journal() -> void:
 	if journal_open:
 		var s := ""
 		if lore_found.is_empty():
-			s = "Записок пока нет.\nВыполняй дневные дела — и узнаешь, кто такой %s и почему он не выпускает с острова…" % CC.NAME
+			s = "Записок пока нет.\nВыполняй дневные дела — и узнаешь, кто такой %s и почему он не выпускает с острова…" % _cname()
 		else:
 			for i in lore_found.size():
 				s += "— %s\n\n" % lore_found[i]
@@ -3874,6 +3892,11 @@ func _load_save() -> void:
 	col_body = Color.from_string(str(data.get("col_body", "")), Color(0.90, 0.90, 0.94))
 	col_legs = Color.from_string(str(data.get("col_legs", "")), Color(0.20, 0.18, 0.24))
 	hat_id = clampi(int(data.get("hat", 0)), 0, 3)
+	chaser_name = str(data.get("chaser_name", ""))
+	streamer_mode = bool(data.get("streamer", false))
+	if data.get("promos", []) is Array:
+		promo_unlocked = data.get("promos", [])
+	flash_unlocked = bool(data.get("flash", false))
 	wins_total = int(data.get("wins", 0))
 	caught_total = int(data.get("tot_caught", 0))
 	best_nights = int(data.get("best_nights", 0))
@@ -3888,7 +3911,7 @@ func _load_save() -> void:
 		_save_day = today
 		_new_daily = true
 		_save_game()
-	lives = MAX_LIVES + daily_bonus
+	lives = MAX_LIVES + daily_bonus + mini(promo_unlocked.size(), 3)
 
 func _save_game() -> void:
 	if _autoplay or _shot or _shotin:
@@ -3897,7 +3920,8 @@ func _save_game() -> void:
 	if f != null:
 		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights, "photo_chosen": photo_chosen,
 		"face_dx": face_dx, "face_dy": face_dy, "face_zoom": face_zoom,
-		"col_body": col_body.to_html(false), "col_legs": col_legs.to_html(false), "hat": hat_id}))
+		"col_body": col_body.to_html(false), "col_legs": col_legs.to_html(false), "hat": hat_id,
+		"chaser_name": chaser_name, "streamer": streamer_mode, "promos": promo_unlocked, "flash": flash_unlocked}))
 		f.close()
 
 func _load_custom_photo() -> void:
@@ -4092,16 +4116,39 @@ func _build_title() -> void:
 		st.add_theme_color_override("font_color", Color(1.0, 0.88, 0.4))
 		st.text = "Серия: %d дн. · бонус +%d жизни сегодня" % [streak, daily_bonus]
 		title_root.add_child(st)
-	if wins_total > 0 or best_nights > 0:
-		var rec := Label.new()
-		rec.set_anchors_preset(Control.PRESET_TOP_WIDE)
-		rec.offset_top = vp.y * 0.42 + 368
-		rec.offset_bottom = vp.y * 0.42 + 392
-		rec.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		rec.add_theme_font_size_override("font_size", 15)
-		rec.add_theme_color_override("font_color", Color(0.75, 0.82, 0.9))
-		rec.text = "Рекорд: %d ноч. · Побегов: %d · Поймали: %d раз" % [best_nights, wins_total, caught_total]
-		title_root.add_child(rec)
+	var rec := Label.new()
+	rec.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	rec.offset_top = vp.y * 0.42 + 362
+	rec.offset_bottom = vp.y * 0.42 + 396
+	rec.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if font_bold != null:
+		rec.add_theme_font_override("font", font_bold)
+	rec.add_theme_font_size_override("font_size", 21)
+	rec.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
+	rec.add_theme_color_override("font_outline_color", Color(0.2, 0.1, 0.05, 0.8))
+	rec.add_theme_constant_override("outline_size", 6)
+	rec.text = "Мой рекорд: Ночь %d · против %s" % [maxi(best_nights, 1), _cname().to_upper()]
+	title_root.add_child(rec)
+	if wins_total > 0 or caught_total > 0:
+		var rec2 := Label.new()
+		rec2.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		rec2.offset_top = vp.y * 0.42 + 398
+		rec2.offset_bottom = vp.y * 0.42 + 420
+		rec2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rec2.add_theme_font_size_override("font_size", 14)
+		rec2.add_theme_color_override("font_color", Color(0.75, 0.82, 0.9))
+		rec2.text = "Побегов: %d · Поймали: %d раз" % [wins_total, caught_total]
+		title_root.add_child(rec2)
+	var bstream := Button.new()
+	bstream.text = "🎥 Стример: %s" % ("Вкл" if streamer_mode else "Выкл")
+	bstream.size = Vector2(200, 40)
+	bstream.position = Vector2(vp.x - 224, vp.y - 56)
+	_style_button(bstream, Color(0.35, 0.38, 0.5), 15)
+	bstream.pressed.connect(func():
+		streamer_mode = not streamer_mode
+		bstream.text = "🎥 Стример: %s" % ("Вкл" if streamer_mode else "Выкл")
+		_save_game())
+	title_root.add_child(bstream)
 	# кросс-промо серии: «Ещё игры» (виден только когда в конфиге задан URL)
 	if CC.MORE_GAMES_URL != "":
 		var bmore := Button.new()
@@ -4117,6 +4164,56 @@ func _build_title() -> void:
 		jl.layer = 6
 		add_child(jl)
 		journal_panel.reparent(jl)
+
+# N: промокоды — локально, без сервера. Секретные (в текстах обновлений/за достижения)
+# + 10 именных для летсплейщиков. Каждый код = +1 жизнь навсегда (макс +3).
+const PROMO_CODES := ["ТАЙНАОСТРОВА", "МИШГАН2026", "НОЧЬ7", "SHARIK", "LESNIK",
+	"BLOGER01", "BLOGER02", "BLOGER03", "BLOGER04", "BLOGER05",
+	"BLOGER06", "BLOGER07", "BLOGER08", "BLOGER09", "BLOGER10"]
+var promo_edit: LineEdit
+var promo_msg: Label
+
+func _try_promo() -> void:
+	if promo_edit == null:
+		return
+	var code := promo_edit.text.strip_edges().to_upper()
+	if code == "":
+		return
+	if not (code in PROMO_CODES):
+		promo_msg.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5))
+		promo_msg.text = "Нет такого кода 🤔"
+		return
+	if code in promo_unlocked:
+		promo_msg.add_theme_color_override("font_color", Color(1.0, 0.85, 0.5))
+		promo_msg.text = "Этот код уже активирован!"
+		return
+	if promo_unlocked.size() >= 3:
+		promo_msg.add_theme_color_override("font_color", Color(1.0, 0.85, 0.5))
+		promo_msg.text = "Максимум 3 кода 😉"
+		return
+	promo_unlocked.append(code)
+	lives += 1
+	_save_game()
+	promo_msg.add_theme_color_override("font_color", Color(0.6, 1.0, 0.7))
+	promo_msg.text = "Код принят: +1 жизнь навсегда! ❤️"
+	_play(snd_ding)
+	if analytics != null:
+		analytics.log_event("promo_code_entered", {"code": code})
+
+func _apply_chaser_name() -> void:
+	if name_edit == null:
+		return
+	var n := name_edit.text.strip_edges()
+	if n == "" or n.to_lower() == CC.NAME.to_lower():
+		chaser_name = ""
+		return
+	if not _name_ok(n):
+		name_edit.text = ""
+		name_edit.placeholder_text = "Придумай другое имя 😊"
+		return
+	chaser_name = n
+	if analytics != null:
+		analytics.log_event("custom_name_set")   # X: факт, не само имя
 
 func _build_choice() -> void:
 	# первый запуск: «от кого убегаешь?» — фото друга или стандартный персонаж
@@ -4149,19 +4246,40 @@ func _build_choice() -> void:
 	sub.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
 	sub.text = "Загрузи фото друга — пусть он гоняется за тобой!"
 	choice_root.add_child(sub)
+	var nmlabel := Label.new()
+	nmlabel.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	nmlabel.offset_top = vp.y * 0.18 + 108
+	nmlabel.offset_bottom = vp.y * 0.18 + 134
+	nmlabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nmlabel.add_theme_font_size_override("font_size", 18)
+	nmlabel.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	nmlabel.text = "Как его зовут? (можно имя друга)"
+	choice_root.add_child(nmlabel)
+	name_edit = LineEdit.new()
+	name_edit.placeholder_text = CC.NAME
+	name_edit.max_length = 14
+	name_edit.size = Vector2(280, 46)
+	name_edit.position = Vector2(vp.x * 0.5 - 140, vp.y * 0.18 + 140)
+	name_edit.add_theme_font_size_override("font_size", 22)
+	name_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	choice_root.add_child(name_edit)
 	var bfriend := Button.new()
 	bfriend.text = "Загрузить фото друга"
 	bfriend.size = Vector2(340, 66)
-	bfriend.position = Vector2(vp.x * 0.5 - 170, vp.y * 0.42)
+	bfriend.position = Vector2(vp.x * 0.5 - 170, vp.y * 0.42 + 40)
 	_style_button(bfriend, Color(0.30, 0.52, 0.80), 24)
-	bfriend.pressed.connect(_pick_photo)
+	bfriend.pressed.connect(func():
+		_apply_chaser_name()
+		_save_game()
+		_pick_photo())
 	choice_root.add_child(bfriend)
 	var bdefault := Button.new()
 	bdefault.text = "Оставить %s" % CC.NAME_GEN
 	bdefault.size = Vector2(340, 58)
-	bdefault.position = Vector2(vp.x * 0.5 - 170, vp.y * 0.42 + 80)
+	bdefault.position = Vector2(vp.x * 0.5 - 170, vp.y * 0.42 + 120)
 	_style_button(bdefault, Color(0.24, 0.60, 0.34), 21)
 	bdefault.pressed.connect(func():
+		_apply_chaser_name()
 		photo_chosen = true
 		_save_game()
 		choice_root.visible = false
@@ -4339,6 +4457,54 @@ func _build_custom() -> void:
 		_rebuild_hats()
 		_save_game()
 	)
+	# переименование монстра (K: в один тап из настроек)
+	var rn_lbl := Label.new()
+	rn_lbl.text = "Имя монстра:"
+	rn_lbl.position = Vector2(cx, 556)
+	rn_lbl.add_theme_font_size_override("font_size", 16)
+	rn_lbl.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	custom_root.add_child(rn_lbl)
+	var rn := LineEdit.new()
+	rn.text = chaser_name
+	rn.placeholder_text = CC.NAME
+	rn.max_length = 14
+	rn.size = Vector2(200, 40)
+	rn.position = Vector2(cx + 130, 548)
+	rn.text_changed.connect(func(t: String):
+		var tn := t.strip_edges()
+		if tn == "" or not _name_ok(tn):
+			chaser_name = "" if tn == "" else chaser_name
+		else:
+			chaser_name = tn
+			if analytics != null:
+				analytics.log_event("custom_name_set")
+		_save_game())
+	custom_root.add_child(rn)
+	# промокод (N: школьный сарафан)
+	var pc_lbl := Label.new()
+	pc_lbl.text = "Промокод:"
+	pc_lbl.position = Vector2(cx, 606)
+	pc_lbl.add_theme_font_size_override("font_size", 16)
+	pc_lbl.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	custom_root.add_child(pc_lbl)
+	promo_edit = LineEdit.new()
+	promo_edit.placeholder_text = "секретный код"
+	promo_edit.max_length = 16
+	promo_edit.size = Vector2(200, 40)
+	promo_edit.position = Vector2(cx + 130, 598)
+	custom_root.add_child(promo_edit)
+	var pc_btn := Button.new()
+	pc_btn.text = "ОК"
+	pc_btn.size = Vector2(64, 40)
+	pc_btn.position = Vector2(cx + 344, 598)
+	_style_button(pc_btn, Color(0.5, 0.42, 0.7), 18)
+	pc_btn.pressed.connect(_try_promo)
+	custom_root.add_child(pc_btn)
+	promo_msg = Label.new()
+	promo_msg.position = Vector2(cx + 130, 644)
+	promo_msg.add_theme_font_size_override("font_size", 15)
+	promo_msg.add_theme_color_override("font_color", Color(0.6, 1.0, 0.7))
+	custom_root.add_child(promo_msg)
 	var bdone := Button.new()
 	bdone.text = "Готово"
 	bdone.size = Vector2(220, 56)
@@ -4973,22 +5139,32 @@ func _physics_process(delta: float) -> void:
 		_cd = 2.5
 		last_seen = player.global_position
 		_play(snd_stinger)
-		if flash_btn != null and not _autoplay and not flashlight_on and CC.ADS_UI:
+		if flash_btn != null and not _autoplay and not flashlight_on and (CC.ADS_UI or flash_unlocked):
 			flash_btn.visible = true      # предложить фонарик на эту ночь (черновик монетизации)
 			flash_btn_t = 12.0
 		if analytics != null and not _autoplay:
 			analytics.log_event("night_reached", {"night": nights})
-		if ads != null and not _autoplay:
+		if ads != null and not _autoplay and not streamer_mode:
 			ads.show_interstitial("night")
 		if not _autoplay:
 			_jumpscare(0.4, 0.75, null)   # ТРИГГЕР: наступила ночь — короткая вспышка лица (стингер уже играет)
 		if done_label != null:
 			done_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.35))
-			done_label.text = "НОЧЬ! %s рядом — беги!" % CC.NAME
+			done_label.text = "НОЧЬ! %s рядом — беги!" % _cname()
 			done_t = 1.9
-	if (not nownight) and _was_night and done_label != null:   # рассвет — облегчение
+	if (not nownight) and _was_night:
+		if not _autoplay:
+			_play(snd_sneeze)   # P: финал ночи = смешной бит («он чихнул и ушёл»)
+		if nights >= 2 and not flash_unlocked:
+			flash_unlocked = true   # награда сразу после Ночи 1 — фонарик навсегда
+			_save_game()
+			if done_label != null:
+				done_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
+				done_label.text = "Награда за Ночь 1: ФОНАРИК! (кнопка ночью)"
+				done_t = 3.2
+	if (not nownight) and _was_night and done_label != null and flash_unlocked and nights > 2:   # рассвет — облегчение
 		done_label.add_theme_color_override("font_color", Color(0.5, 1.0, 0.6))
-		done_label.text = "Рассвет — %s ушёл, делай дела" % CC.NAME
+		done_label.text = "Рассвет — %s ушёл, делай дела" % _cname()
 		done_t = 2.0
 	_was_night = nownight
 	# периодическое уханье совы ночью / щебет птиц днём
@@ -5179,8 +5355,8 @@ func _move_timokha(delta: float) -> void:
 		tk_aggro = _has_los()
 		if _spotted_cd > 0.0:
 			_spotted_cd -= delta
-		if tk_aggro and not _was_aggro and _spotted_cd <= 0.0 and not _autoplay and snd_spotted != null:
-			_play(snd_spotted)   # мемный гудок «заметил тебя» (на фронте обнаружения)
+		if tk_aggro and not _was_aggro and _spotted_cd <= 0.0 and not _autoplay:
+			_play(snd_chant if snd_chant != null else snd_spotted)   # L: кричалка «заметил тебя»
 			_spotted_cd = 5.0
 		_was_aggro = tk_aggro
 		var close := dist < 16.0 and tk_aggro   # рывок-телеграф только вблизи и при прямой видимости
@@ -5547,7 +5723,7 @@ func _check_catch() -> void:
 				ads.show_interstitial("catch")
 			if done_label != null:
 				done_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.45))
-				done_label.text = "%s схватил! Жизней осталось: %d" % [CC.NAME, lives]
+				done_label.text = "%s схватил! Жизней осталось: %d" % [_cname(), lives]
 				done_t = 2.2
 		else:
 			lost = true                   # жизни кончились → экран конца (воскрешение/рестарт)
@@ -5728,7 +5904,7 @@ func _refresh_hud() -> void:
 			win_overlay.visible = true
 			win_label.visible = true
 			win_label.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
-			win_label.text = "%s ПОЙМАЛ ТЕБЯ!\n\nПродержался ночей: %d · дел: %d/%d" % [CC.NAME.to_upper(), nights, quests_done, quests.size()]
+			win_label.text = "%s ПОЙМАЛ ТЕБЯ!\n\nПродержался ночей: %d · дел: %d/%d" % [_cname().to_upper(), nights, quests_done, quests.size()]
 		if revive_btn != null:
 			revive_btn.visible = not _revived   # воскрешение «за рекламу» — один раз за забег
 		if restart_btn != null:
@@ -5756,7 +5932,7 @@ func _refresh_hud() -> void:
 	var phase := ""
 	var pcol := Color(0.72, 1.0, 0.75)
 	if wake > 0.0:
-		phase = "%s спит: %0.0f" % [CC.NAME, wake]
+		phase = "%s спит: %0.0f" % [_cname(), wake]
 		pcol = Color(1.0, 0.9, 0.5)
 	elif t <= 0.52:
 		phase = "ДЕНЬ · до ночи %0.0f" % ((0.52 - t) * DAY_LEN)
@@ -5829,6 +6005,8 @@ func _build_audio() -> void:
 	snd_crickets = _make_audio_player(_load_wav("crickets", true), -60.0)   # громкость растёт ночью (в _day_night)
 	snd_owl = _make_audio_player(_load_wav("owl", false), -16.0)
 	snd_birds = _make_audio_player(_load_wav("birds", false), -15.0)
+	snd_sneeze = _make_audio_player(_load_wav("sneeze", false), -8.0)
+	snd_chant = _make_audio_player(_load_wav("chant", false), -10.0)
 	snd_thunder = _make_audio_player(_load_wav("thunder", false), -7.0)
 	snd_dread = _make_audio_player(_load_wav("dread", true), -60.0)   # громкость рулится в _audio_tick (саспенс)
 	snd_boom = _make_audio_player(_load_wav(CC.SND_BOOM, false), -2.0)     # мемный «вайн-бум» на джампскейрах

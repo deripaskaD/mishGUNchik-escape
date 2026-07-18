@@ -292,3 +292,42 @@ def bird_phrase(vol=0.14):
 
 
 write("birds", seq(bird_phrase(), sil(0.3)))
+
+
+def sneeze(vol=0.5):
+    """Смешной чих монстра на рассвете (P: финал ночи = смешной бит)."""
+    o = []
+    # вдох «аaa» — восходящий тон
+    n = int(SR * 0.28)
+    for i in range(n):
+        t = i / SR
+        f = 220 + 340 * (t / 0.28)
+        o.append(math.sin(2 * math.pi * f * t) * 0.35 * vol * (i / n))
+    # «ПЧХИ» — шумовой взрыв с нисходящим тоном
+    n2 = int(SR * 0.34)
+    for i in range(n2):
+        t = i / SR
+        env = math.exp(-7.0 * t)
+        f = 700 - 500 * (t / 0.34)
+        o.append((random.uniform(-1, 1) * 0.55 + math.sin(2 * math.pi * f * t) * 0.5) * env * vol)
+    return o
+
+
+def chant(vol=0.55):
+    """Кричалка монстра (L): ритм «та-та-ТА-ТА» — смешно-жуткий стинг, легко повторить."""
+    o = []
+    pat = [(392, 0.14, 0.5), (392, 0.14, 0.5), (523, 0.2, 0.9), (466, 0.26, 1.0)]
+    for f, dur, acc in pat:
+        n = int(SR * dur)
+        for i in range(n):
+            t = i / SR
+            v = math.sin(2 * math.pi * (f + 24 * math.sin(2 * math.pi * 9 * t)) * t)
+            sq = 1.0 if v > 0 else -1.0   # квадратная «дудка»
+            env = min(1.0, i / (SR * 0.01)) * math.exp(-4.5 * t)
+            o.append((v * 0.6 + sq * 0.4) * env * vol * acc)
+        o += sil(0.05)
+    return o
+
+
+write("sneeze", sneeze())
+write("chant", chant())
