@@ -101,6 +101,14 @@ var spot_node: SpotLight3D
 var spot_beam: MeshInstance3D
 var spot_ang := 0.0
 var _spot_hit_cd := 0.0
+# пролог-превращение (клип-момент №1): только первый запуск, со скипом
+var prologue_seen := false
+var prologue_pending := false
+var prologue_active := false
+var prologue_t := 0.0
+var prologue_label: Label
+var prologue_skip: Button
+var _pro_flash_done := false
 const CAR_POS := Vector3(30.0, 0.0, 116.0)   # карусель старого парка (зона 2)
 var car_root: Node3D
 var car_horses: Array = []
@@ -557,6 +565,12 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--shotpro" in args:
+		_shot = true
+		prologue_seen = false
+		_begin_prologue()
+		prologue_t = 6.7    # форс фазы 3: вспышка + Кривой в зеркале
+		_shot_delay = 1.6
 	if "--shotcar" in args:
 		_shot = true
 		player.global_position = Vector3(30.0, _terrain_h(30.0, 125.0) + 1.6, 125.0)   # дефолт взгляда -Z — на карусель
@@ -4630,6 +4644,7 @@ func _load_save() -> void:
 	if data.get("shards", []) is Array:
 		shards_found = data.get("shards", [])
 	true_end_seen = bool(data.get("true_end", false))
+	prologue_seen = bool(data.get("prologue", false))
 	wins_total = int(data.get("wins", 0))
 	caught_total = int(data.get("tot_caught", 0))
 	best_nights = int(data.get("best_nights", 0))
@@ -4654,7 +4669,7 @@ func _save_game() -> void:
 		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights, "photo_chosen": photo_chosen,
 		"face_dx": face_dx, "face_dy": face_dy, "face_zoom": face_zoom,
 		"col_body": col_body.to_html(false), "col_legs": col_legs.to_html(false), "hat": hat_id,
-		"chaser_name": chaser_name, "streamer": streamer_mode, "promos": promo_unlocked, "flash": flash_unlocked, "shards": shards_found, "true_end": true_end_seen}))
+		"chaser_name": chaser_name, "streamer": streamer_mode, "promos": promo_unlocked, "flash": flash_unlocked, "shards": shards_found, "true_end": true_end_seen, "prologue": prologue_seen}))
 		f.close()
 
 func _load_custom_photo() -> void:
@@ -5260,6 +5275,11 @@ func _start_game() -> void:
 	if analytics != null:
 		analytics.log_event("game_start")
 	paused = false
+	if not prologue_seen and not prologue_active and not _autoplay and not _shot:
+		if OS.has_feature("web") and _warmup_frames > 0:
+			prologue_pending = true   # веб: пролог после ширмы прогрева
+		else:
+			_begin_prologue()
 	_tut_t = 9.0   # туториал стартует с нажатия «Играть» (не горит под тайтлом)
 	if tutorial_label != null:
 		tutorial_label.visible = true
@@ -5847,6 +5867,7 @@ func _process(delta: float) -> void:
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
 	_tick_liftoff(delta)
+	_tick_prologue(delta)
 	_tick_machines(delta)
 	_tick_night_features(delta)
 	_tick_carousel(delta)
@@ -5957,7 +5978,7 @@ func _save_shot() -> void:
 
 # ── симуляция ──
 func _physics_process(delta: float) -> void:
-	if won or lost or paused or liftoff_active:
+	if won or lost or paused or liftoff_active or prologue_active:
 		return
 	clock += delta
 	nights = int(clock / DAY_LEN) + 1
@@ -6121,6 +6142,87 @@ func _begin_warmup() -> void:
 	warmup_label.text = "Готовим остров…"
 	warmup_root.add_child(warmup_label)
 
+func _begin_prologue() -> void:
+	prologue_active = true
+	prologue_t = 0.0
+	_pro_flash_done = false
+	player.global_position = Vector3(0, 1.6, -11.2)
+	player.rotation.y = PI   # лицом к раме Зеркала за избой
+	if timokha != null:
+		timokha.global_position = MIRROR_POS + Vector3(0, 1.0, 1.7)
+		timokha.look_at(MIRROR_POS + Vector3(0, 1.0, 0), Vector3.UP)   # друг смотрит в зеркало
+	if prologue_label == null and done_label != null:
+		var lay := done_label.get_parent()
+		prologue_label = Label.new()
+		prologue_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		var vp := get_viewport().get_visible_rect().size
+		prologue_label.offset_top = vp.y * 0.24
+		prologue_label.offset_bottom = vp.y * 0.24 + 150
+		prologue_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		prologue_label.add_theme_font_size_override("font_size", 44)
+		prologue_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.8))
+		prologue_label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+		prologue_label.add_theme_constant_override("outline_size", 9)
+		lay.add_child(prologue_label)
+		prologue_skip = Button.new()
+		prologue_skip.text = "Пропустить ▸"
+		prologue_skip.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		prologue_skip.offset_left = -300
+		prologue_skip.offset_right = -60
+		prologue_skip.offset_top = 290
+		prologue_skip.offset_bottom = 350
+		prologue_skip.add_theme_font_size_override("font_size", 26)
+		prologue_skip.pressed.connect(func(): _end_prologue())
+		lay.add_child(prologue_skip)
+	prologue_label.visible = true
+	prologue_skip.visible = true
+
+func _tick_prologue(delta: float) -> void:
+	if not prologue_active:
+		return
+	prologue_t += delta
+	var txt := ""
+	if prologue_t < 3.4:
+		txt = "%s позвал тебя на заброшенный
+ОСТРОВ СМЕХА…" % _cname()
+	elif prologue_t < 6.6:
+		txt = "Старая Комната Смеха.
+Кривое зеркало…"
+	elif prologue_t < 10.0:
+		if not _pro_flash_done:
+			_pro_flash_done = true
+			_play(snd_claugh)
+			if catch_flash != null:
+				catch_flash.color = Color(1.0, 1.0, 1.0, 0.0)
+				flash_v = 1.0
+			if timokha != null:
+				timokha.global_position = MIRROR_POS + Vector3(0, 1.0, 0)   # «вышел из зеркала»
+		txt = "Из зеркала вышел КРИВОЙ.
+Твой друг — у него внутри."
+	elif prologue_t < 13.4:
+		if timokha != null and timokha.global_position.z < 0.0:
+			timokha.global_position = Vector3(0, _terrain_h(0, 26) + 1.0, 26.0)   # ушёл в парк
+		txt = "Днём делай дела. Ночью прячься.
+Собери шар — и спаси друга."
+	else:
+		_end_prologue()
+		return
+	if prologue_label != null:
+		prologue_label.text = txt
+
+func _end_prologue() -> void:
+	prologue_active = false
+	prologue_seen = true
+	_save_game()
+	if prologue_label != null:
+		prologue_label.visible = false
+	if prologue_skip != null:
+		prologue_skip.visible = false
+	if timokha != null and timokha.global_position.z < 0.0:
+		timokha.global_position = Vector3(0, _terrain_h(0, 26) + 1.0, 26.0)
+	player.global_position = Vector3(0, 1.6, 14.0)   # обычный старт перед избой
+	player.rotation.y = 0.0
+
 func _grant_win() -> void:
 	won = true
 	_play(snd_win)
@@ -6230,6 +6332,9 @@ func _tick_warmup(_delta: float) -> void:
 			warmup_root.get_parent().queue_free()
 			warmup_root = null
 			warmup_label = null
+		if prologue_pending:
+			prologue_pending = false
+			_begin_prologue()
 
 func _move_player(delta: float) -> void:
 	if _warmup_frames > 0:
