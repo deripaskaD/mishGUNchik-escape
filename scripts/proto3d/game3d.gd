@@ -77,6 +77,10 @@ var bal_flame: MeshInstance3D
 var bal_env: MeshInstance3D
 var bal_ropes: Node3D
 const BAL_POS := Vector3(11.5, 0.0, 199.5)   # шар на песчаной косе у причала
+var liftoff_active := false    # финальная сцена взлёта (клип-момент)
+var liftoff_t := 0.0
+var bal_lift := 0.0
+var _lo_sneezed := false
 var mirror_built := false      # Главное Зеркало собрано (истинная концовка)
 var true_end_run := false      # текущая победа = истинная концовка
 var true_end_seen := false     # сейв: истинная концовка открыта (значок на тайтле)
@@ -529,6 +533,10 @@ func _ready() -> void:
 		if "--full" in args:
 			quests_done = quests.size() - 1 if not quests.is_empty() else 16
 			_update_balloon_stage()
+		if "--lift" in args:
+			liftoff_active = true
+			liftoff_t = 0.0
+			_shot_delay = 3.6   # кадр в середине взлёта (вид из корзины + Кривой внизу)
 	if "--shotmirror" in args:
 		_shot = true
 		player.global_position = Vector3(0, 1.6, -11.5)   # за избой, лицом к раме Главного Зеркала
@@ -1477,8 +1485,8 @@ void fragment() {
 	bal_ropes = Node3D.new()
 	bal_ropes.position = BAL_POS
 	add_child(bal_ropes)
-	for rx in [-0.62, 0.62]:
-		for rz in [-0.62, 0.62]:
+	for rx in [-0.78, 0.78]:
+		for rz in [-0.78, 0.78]:
 			var rp := MeshInstance3D.new()
 			var rm := CylinderMesh.new()
 			rm.top_radius = 0.035
@@ -5492,7 +5500,8 @@ func _process(delta: float) -> void:
 			cam.position = Vector3(bx, 0.7 + by, 0)
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
-	if bal_parts_built >= 5 and bal_env != null:
+	_tick_liftoff(delta)
+	if bal_parts_built >= 5 and bal_env != null and not liftoff_active:
 		var bb := sin(clock * 0.8) * 0.28
 		bal_env.position.y = BAL_POS.y + 6.6 + bb
 		bal_ropes.position.y = BAL_POS.y + bb * 0.85
@@ -5599,7 +5608,7 @@ func _save_shot() -> void:
 
 # ── симуляция ──
 func _physics_process(delta: float) -> void:
-	if won or lost or paused:
+	if won or lost or paused or liftoff_active:
 		return
 	clock += delta
 	nights = int(clock / DAY_LEN) + 1
@@ -5762,6 +5771,48 @@ func _begin_warmup() -> void:
 	warmup_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
 	warmup_label.text = "Готовим остров…"
 	warmup_root.add_child(warmup_label)
+
+func _grant_win() -> void:
+	won = true
+	_play(snd_win)
+	wins_total += 1
+	best_nights = maxi(best_nights, nights)
+	_save_game()
+	if analytics != null and not _autoplay:
+		analytics.log_event("game_win", {"nights": nights, "caught": caught, "seconds": int(clock)})
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # курсор для кнопки «Играть снова»
+
+func _tick_liftoff(delta: float) -> void:
+	# взлёт: игрок в корзине, шар уходит вверх; Кривой прыгает снизу, чихает и сдаётся
+	if not liftoff_active:
+		return
+	liftoff_t += delta
+	bal_lift = pow(minf(liftoff_t / 5.0, 1.0), 1.4) * 17.0
+	bal_basket.position.y = BAL_POS.y + bal_lift
+	bal_burner.position.y = BAL_POS.y + bal_lift
+	bal_ropes.position.y = BAL_POS.y + bal_lift
+	bal_env.position = BAL_POS + Vector3(0, 6.6 + bal_lift + sin(liftoff_t * 2.0) * 0.15, 0)
+	bal_flame.scale.y = 1.7 + sin(liftoff_t * 11.0) * 0.35
+	player.global_position = BAL_POS + Vector3(0, 1.5 + bal_lift, 0)
+	player.velocity = Vector3.ZERO
+	if timokha != null:
+		var tb := _terrain_h(8.0, 193.0)
+		if liftoff_t < 2.2:
+			timokha.global_position = Vector3(8.0, tb + 1.0 + absf(sin(liftoff_t * 5.0)) * 0.55, 193.0)
+		elif liftoff_t < 3.4:
+			if not _lo_sneezed:
+				_lo_sneezed = true
+				_play(snd_sneeze)
+				if done_label != null:
+					done_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
+					done_label.text = "%s хотел догнать… но чихнул" % _cname()
+					done_t = 3.2
+			timokha.global_position = Vector3(8.0, tb + 0.55, 193.0)
+		else:
+			timokha.global_position = Vector3(8.0, tb + 1.0, 193.0)
+	if liftoff_t >= 5.6:
+		liftoff_active = false
+		_grant_win()
 
 func _tick_mirror(delta: float) -> void:
 	# истинная концовка: собери 7 осколков → собери зеркало за избой → покажи Кривому отражение
@@ -6127,14 +6178,13 @@ func _finish_quest(q: Dictionary) -> void:
 	elif q["kind"] == "herb":
 		herbs += 1
 	if q["kind"] == "yacht":
-		won = true
-		_play(snd_win)
-		wins_total += 1
-		best_nights = maxi(best_nights, nights)
-		_save_game()
-		if analytics != null and not _autoplay:
-			analytics.log_event("game_win", {"nights": nights, "caught": caught, "seconds": int(clock)})
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # курсор для кнопки «Играть снова»
+		if _autoplay:
+			_grant_win()
+		else:
+			liftoff_active = true
+			liftoff_t = 0.0
+			_lo_sneezed = false
+			_play(snd_ding)
 	else:
 		_play(snd_ding)
 		if catch_flash != null:
