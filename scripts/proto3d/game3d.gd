@@ -66,6 +66,18 @@ var _siren_played := false
 var tk_disco_t := 0.0        # Кривой танцует (окно побега, мем-момент)
 var tk_trip_t := 0.0         # Кривой споткнулся
 var flash_unlocked := false   # P: фонарик — награда за Ночь 1 (навсегда)
+# ═══ ОСКОЛКИ ЗЕРКАЛА (концепт §5-6): 7 секреток по острову, счёт между сессиями ═══
+var shards_found: Array = []      # индексы собранных
+var shard_nodes: Array = []       # [{idx, pos, node}]
+const SHARD_SPOTS := [
+	Vector3(4.0, 0, 197.0),       # №1 пирс — лежит открыто (обучение)
+	Vector3(-106.0, 0, -126.0),   # №2 у мельницы
+	Vector3(179.5, 0, 31.5),      # №3 за баней
+	Vector3(-146.5, 0, 90.0),     # №4 кладбище
+	Vector3(-131.5, 0, 147.0),    # №5 у вышки
+	Vector3(212.0, 0, -212.0),    # №6 дальняя глушь (труднонаходимый — топливо теорий)
+	Vector3(0.0, 0, -6.5),        # №7 внутри избы, за котлом
+]
 var _birds_t := 5.0
 var snd_thunder: AudioStreamPlayer
 var snd_dread: AudioStreamPlayer
@@ -439,6 +451,7 @@ func _ready() -> void:
 	_flush_batches()   # весь накопленный лес/декор → MultiMesh (после ВСЕХ строителей)
 	_spawn_critters()
 	_spawn_bats()
+	_spawn_shards()
 	if not _autoplay:
 		_build_rain()
 	_build_hud()
@@ -1924,6 +1937,60 @@ func _furn(nm: String, pos: Vector3, sc: float, rot: float = 0.0) -> bool:
 	pivot.add_child(inst)
 	add_child(pivot)
 	return true
+
+func _spawn_shards() -> void:
+	# зеркальные осколки: вращающиеся кристаллы; собранные не респавнятся (сейв)
+	if _autoplay:
+		return
+	for i in SHARD_SPOTS.size():
+		if i in shards_found:
+			continue
+		var sp: Vector3 = SHARD_SPOTS[i]
+		sp.y = _terrain_h(sp.x, sp.z) + 0.85
+		var m := MeshInstance3D.new()
+		var pm := PrismMesh.new()
+		pm.size = Vector3(0.55, 0.8, 0.06)
+		m.mesh = pm
+		m.position = sp
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.75, 0.92, 1.0)
+		mat.metallic = 0.9
+		mat.roughness = 0.05
+		mat.emission_enabled = true
+		mat.emission = Color(0.55, 0.85, 1.0)
+		mat.emission_energy_multiplier = 1.4
+		m.material_override = mat
+		add_child(m)
+		shard_nodes.append({"idx": i, "pos": sp, "node": m})
+
+func _update_shards(delta: float) -> void:
+	if shard_nodes.is_empty():
+		return
+	for sh in shard_nodes:
+		var n := sh["node"] as Node3D
+		if not is_instance_valid(n):
+			continue
+		n.rotation.y += delta * 2.2
+		n.position.y = (sh["pos"] as Vector3).y + sin(clock * 2.0 + float(sh["idx"])) * 0.12
+		var d: Vector3 = player.global_position - n.position
+		if Vector2(d.x, d.z).length() < 1.7 and absf(d.y) < 2.2:
+			shards_found.append(sh["idx"])
+			n.queue_free()
+			sh["node"] = null
+			_play(snd_ding)
+			if catch_flash != null:
+				catch_flash.color = Color(0.6, 0.9, 1.0, 0.0)
+				flash_v = 0.4
+			if done_label != null:
+				done_label.add_theme_color_override("font_color", Color(0.7, 0.92, 1.0))
+				if shards_found.size() >= 7:
+					done_label.text = "ВСЕ 7 ОСКОЛКОВ! Зеркало можно собрать… (скоро)"
+					done_t = 3.4
+				else:
+					done_label.text = "Осколок зеркала! (%d/7)" % shards_found.size()
+					done_t = 2.2
+			_save_game()
+	shard_nodes = shard_nodes.filter(func(x): return x["node"] != null)
 
 func _spawn_critters() -> void:
 	# живность «99 ночей»: олени и лисы бродят днём, убегают от игрока, ночью прячутся
@@ -4058,6 +4125,8 @@ func _load_save() -> void:
 	if data.get("promos", []) is Array:
 		promo_unlocked = data.get("promos", [])
 	flash_unlocked = bool(data.get("flash", false))
+	if data.get("shards", []) is Array:
+		shards_found = data.get("shards", [])
 	wins_total = int(data.get("wins", 0))
 	caught_total = int(data.get("tot_caught", 0))
 	best_nights = int(data.get("best_nights", 0))
@@ -4082,7 +4151,7 @@ func _save_game() -> void:
 		f.store_string(JSON.stringify({"day": _save_day, "streak": streak, "bonus": daily_bonus, "lore": lore_idx, "lowgfx": lowgfx, "noads": noads, "gentle": gentle, "wins": wins_total, "tot_caught": caught_total, "best_nights": best_nights, "photo_chosen": photo_chosen,
 		"face_dx": face_dx, "face_dy": face_dy, "face_zoom": face_zoom,
 		"col_body": col_body.to_html(false), "col_legs": col_legs.to_html(false), "hat": hat_id,
-		"chaser_name": chaser_name, "streamer": streamer_mode, "promos": promo_unlocked, "flash": flash_unlocked}))
+		"chaser_name": chaser_name, "streamer": streamer_mode, "promos": promo_unlocked, "flash": flash_unlocked, "shards": shards_found}))
 		f.close()
 
 func _load_custom_photo() -> void:
@@ -4288,7 +4357,7 @@ func _build_title() -> void:
 	rec.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
 	rec.add_theme_color_override("font_outline_color", Color(0.2, 0.1, 0.05, 0.8))
 	rec.add_theme_constant_override("outline_size", 6)
-	rec.text = "Мой рекорд: Ночь %d · против %s" % [maxi(best_nights, 1), _cname().to_upper()]
+	rec.text = "Мой рекорд: Ночь %d · Осколки %d/7 · против %s" % [maxi(best_nights, 1), shards_found.size(), _cname().to_upper()]
 	title_root.add_child(rec)
 	if wins_total > 0 or caught_total > 0:
 		var rec2 := Label.new()
@@ -5272,6 +5341,7 @@ func _process(delta: float) -> void:
 	_tick_warmup(delta)
 	_update_critters(delta)
 	_event_director(delta)
+	_update_shards(delta)
 	if _perf_test:
 		_perf_t += delta
 		if _perf_t > 2.0 and _perf_t < 8.0:
