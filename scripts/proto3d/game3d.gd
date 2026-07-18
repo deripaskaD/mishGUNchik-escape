@@ -69,6 +69,14 @@ var flash_unlocked := false   # P: фонарик — награда за Ноч
 # ═══ ОСКОЛКИ ЗЕРКАЛА (концепт §5-6): 7 секреток по острову, счёт между сессиями ═══
 var shards_found: Array = []      # индексы собранных
 var shard_nodes: Array = []       # [{idx, pos, node}]
+var bal_parts_built := -1      # видимая стадия сборки воздушного шара (0..5)
+var bal_pile: Node3D
+var bal_basket: Node3D
+var bal_burner: Node3D
+var bal_flame: MeshInstance3D
+var bal_env: MeshInstance3D
+var bal_ropes: Node3D
+const BAL_POS := Vector3(11.5, 0.0, 199.5)   # шар на песчаной косе у причала
 var mirror_built := false      # Главное Зеркало собрано (истинная концовка)
 var true_end_run := false      # текущая победа = истинная концовка
 var true_end_seen := false     # сейв: истинная концовка открыта (значок на тайтле)
@@ -208,7 +216,7 @@ const LORE := [
 	"Записка №4: «Не смотри в зеркала после заката. Пожалуйста. Они запоминают.»",
 	"Записка №5: «Он гоняется не со зла. Кривые не выносят одиночества — зеркало велит привести второго. Меня хватило одного…»",
 	"Записка №6: «Мне тут скучно, ХА-ХА, зачёркнуто, СТРАШНО. Днём я прячусь внутри него и пишу тебе. Ночью пишет ОН.»",
-	"Записка №7: «Почини яхту и уплывай. Только… посмотри на него в последний раз. Вдруг узнаешь меня?»",
+	"Записка №7: «Собери воздушный шар и улетай. Только… посмотри на него в последний раз. Вдруг узнаешь меня?»",
 	"Записка №8: «Ты уплыл? Молодец. А знаешь, что смешно? Кривых в коллекции Директора было БОЛЬШЕ… (продолжение следует)»",
 ]
 var note_panel: Panel
@@ -514,6 +522,13 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--shotbal" in args:
+		_shot = true
+		player.global_position = Vector3(7.0, 1.6, 192.0)
+		player.rotate_y(PI + 0.66)   # от причала на шар (dir ≈ (0.61, 0, 0.79))
+		if "--full" in args:
+			quests_done = quests.size() - 1 if not quests.is_empty() else 16
+			_update_balloon_stage()
 	if "--shotmirror" in args:
 		_shot = true
 		player.global_position = Vector3(0, 1.6, -11.5)   # за избой, лицом к раме Главного Зеркала
@@ -688,14 +703,14 @@ func _ready() -> void:
 		player.global_position.y = maxf(sp.y, _terrain_h(sp.x, sp.z) + 1.6)
 	if tutorial_label != null:
 		if show_touch:
-			tutorial_label.text = "Джойстик — идти, свайп — камера, БЕГ\nДнём делай дела · ночью беги · почини яхту!"
+			tutorial_label.text = "Джойстик — идти, свайп — камера, БЕГ\nДнём делай дела · ночью беги · собери шар!"
 		else:
-			tutorial_label.text = "WASD — идти, мышь — камера, Shift — бег\nДнём делай дела · ночью беги · почини яхту!"
+			tutorial_label.text = "WASD — идти, мышь — камера, Shift — бег\nДнём делай дела · ночью беги · собери шар!"
 	if pause_controls != null:
 		if show_touch:
-			pause_controls.text = "Управление: левый джойстик — идти · правая зона свайп — камера\nкнопки БЕГ / ПРЫЖОК · кнопка ❚❚ — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
+			pause_controls.text = "Управление: левый джойстик — идти · правая зона свайп — камера\nкнопки БЕГ / ПРЫЖОК · кнопка ❚❚ — пауза\nДнём делай дела · ночью беги и прячься · собери шар"
 		else:
-			pause_controls.text = "Управление: WASD — идти · Shift — бег · мышь — осмотр\nSpace — прыжок · Esc — пауза\nДнём делай дела · ночью беги и прячься · почини яхту"
+			pause_controls.text = "Управление: WASD — идти · Shift — бег · мышь — осмотр\nSpace — прыжок · Esc — пауза\nДнём делай дела · ночью беги и прячься · собери шар"
 	# реальный игрок (не скриншот/не автоплей): мир на паузе; первый запуск → выбор фото, дальше тайтл
 	if _has_diag("nohud"):
 		for ch in get_children():
@@ -1393,6 +1408,115 @@ func _smoke(pos: Vector3, amount: int, lifetime: float, gravity: Vector3, smin: 
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.material_override = mat
 	add_child(sm)
+
+func _build_balloon() -> void:
+	# видимая сборка шара из 5 частей: кучка деталей → корзина → горелка →
+	# сдутая оболочка → полунадутая → готовый шар (пламя, канаты, покачивание)
+	var wood_m := _mat(Color(0.5, 0.34, 0.18))
+	bal_pile = Node3D.new()
+	bal_pile.position = BAL_POS
+	add_child(bal_pile)
+	_box(bal_pile, Vector3(0, 0.35, 0), Vector3(1.3, 0.7, 1.0), wood_m, false)
+	_box(bal_pile, Vector3(0.9, 0.25, 0.5), Vector3(0.8, 0.5, 0.7), wood_m, false)
+	_box(bal_pile, Vector3(-0.7, 0.2, -0.6), Vector3(0.6, 0.4, 0.9), wood_m, false)
+	bal_basket = Node3D.new()
+	bal_basket.position = BAL_POS
+	add_child(bal_basket)
+	_box(bal_basket, Vector3(0, 0.6, 0), Vector3(1.6, 1.2, 1.6), wood_m, false)
+	_box(bal_basket, Vector3(0, 1.24, 0), Vector3(1.76, 0.12, 1.76), _mat(Color(0.36, 0.24, 0.12)), false)
+	bal_burner = Node3D.new()
+	bal_burner.position = BAL_POS
+	add_child(bal_burner)
+	var bc := MeshInstance3D.new()
+	var bcm := CylinderMesh.new()
+	bcm.top_radius = 0.22
+	bcm.bottom_radius = 0.3
+	bcm.height = 0.5
+	bc.mesh = bcm
+	bc.position = Vector3(0, 1.55, 0)
+	bc.material_override = _mat(Color(0.35, 0.37, 0.4))
+	bal_burner.add_child(bc)
+	bal_flame = MeshInstance3D.new()
+	var fm := CylinderMesh.new()
+	fm.top_radius = 0.02
+	fm.bottom_radius = 0.2
+	fm.height = 0.7
+	bal_flame.mesh = fm
+	bal_flame.position = Vector3(0, 2.15, 0)
+	var flm := StandardMaterial3D.new()
+	flm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flm.albedo_color = Color(1.0, 0.62, 0.15)
+	flm.emission_enabled = true
+	flm.emission = Color(1.0, 0.5, 0.1)
+	flm.emission_energy_multiplier = 1.6
+	bal_flame.material_override = flm
+	bal_burner.add_child(bal_flame)
+	# оболочка: сфера с полосами цирковых цветов (одна нода, стадии меняют scale/позицию)
+	bal_env = MeshInstance3D.new()
+	var em := SphereMesh.new()
+	em.radius = 1.0
+	em.height = 2.0
+	bal_env.mesh = em
+	var esh := Shader.new()
+	esh.code = """shader_type spatial;
+uniform vec4 c1 : source_color = vec4(0.86, 0.22, 0.2, 1.0);
+uniform vec4 c2 : source_color = vec4(0.97, 0.93, 0.82, 1.0);
+varying vec3 lp;
+void vertex() { lp = VERTEX; }
+void fragment() {
+	float st = step(0.5, fract(atan(lp.x, lp.z) * 1.2732));
+	ALBEDO = mix(c1.rgb, c2.rgb, st);
+	ROUGHNESS = 0.65;
+}
+"""
+	var eshm := ShaderMaterial.new()
+	eshm.shader = esh
+	bal_env.material_override = eshm
+	add_child(bal_env)
+	# канаты корзина→купол
+	bal_ropes = Node3D.new()
+	bal_ropes.position = BAL_POS
+	add_child(bal_ropes)
+	for rx in [-0.62, 0.62]:
+		for rz in [-0.62, 0.62]:
+			var rp := MeshInstance3D.new()
+			var rm := CylinderMesh.new()
+			rm.top_radius = 0.035
+			rm.bottom_radius = 0.035
+			rm.height = 2.4
+			rp.mesh = rm
+			rp.position = Vector3(rx, 2.4, rz)
+			rp.material_override = _mat(Color(0.32, 0.26, 0.18))
+			bal_ropes.add_child(rp)
+	_update_balloon_stage()
+
+func _balloon_parts() -> int:
+	if quests.is_empty():
+		return 0
+	return clampi(int(floor(float(quests_done) * 5.0 / float(maxi(1, quests.size() - 1)))), 0, 5)
+
+func _update_balloon_stage() -> void:
+	if bal_env == null:
+		return
+	var n := _balloon_parts()
+	if n == bal_parts_built:
+		return
+	bal_parts_built = n
+	bal_pile.visible = n == 0
+	bal_basket.visible = n >= 1
+	bal_burner.visible = n >= 2
+	bal_env.visible = n >= 3
+	bal_ropes.visible = n >= 5
+	bal_flame.visible = n >= 5
+	if n == 3:   # сдутая оболочка лежит рядом на песке
+		bal_env.scale = Vector3(3.0, 0.45, 2.3)
+		bal_env.position = BAL_POS + Vector3(4.6, 0.35, -0.5)
+	elif n == 4:   # полунадутая над корзиной
+		bal_env.scale = Vector3(2.2, 1.4, 2.2)
+		bal_env.position = BAL_POS + Vector3(0, 2.6, 0)
+	elif n >= 5:   # готов к полёту
+		bal_env.scale = Vector3(3.1, 3.4, 3.1)
+		bal_env.position = BAL_POS + Vector3(0, 6.6, 0)
 
 func _cauldron(pos: Vector3) -> void:
 	var body := MeshInstance3D.new()
@@ -2903,16 +3027,10 @@ void fragment() {
 		wm.set_shader_parameter("col", Color(0.20, 0.55, 0.88, 0.9))   # сочная роблокс-вода
 	water.material_override = wm
 	add_child(water)
-	# причал + яхта (у дальнего края воды)
+	# причал + воздушный шар (концепт «Остров Смеха»: побег — по воздуху)
 	_box(self, Vector3(8, 0.3, 200), Vector3(2.6, 0.3, 16), m_log, false)
-	# яхта: корабль из Kenney Pirate Kit (CC0) вместо коробки с мачтой
-	if ResourceLoader.exists("res://art/models/pirate/ship-small.glb"):
-		var ship: Node3D = (load("res://art/models/pirate/ship-small.glb") as PackedScene).instantiate()
-		ship.position = Vector3(8, -0.12, 215)
-		ship.rotation.y = PI   # носом в открытое море
-		ship.scale = Vector3.ONE * 1.1
-		add_child(ship)
-	else:
+	_build_balloon()
+	if false:
 		var boat := MeshInstance3D.new()
 		var bm := BoxMesh.new()
 		bm.size = Vector3(3.4, 1.3, 7.0)
@@ -3458,7 +3576,7 @@ func _build_quests() -> void:
 	_add_quest("banya", Vector3(176, 0, 28), "Затопи баню", "task")
 	_add_quest("bones", Vector3(-150, 0, 92), "Похорони кости", "task")
 	_add_quest("brew", Vector3(-1.8, 0, -2.8), "Свари варево", "brew")
-	_add_quest("yacht", Vector3(8, 0, WORLD - 15.0), "Почини яхту — побег!", "yacht")
+	_add_quest("yacht", Vector3(8, 0, WORLD - 15.0), "Собери шар — улетай!", "yacht")
 	# пропсы у точек
 	_woodpile(Vector3(72, 0, -66))
 	_axe_stump(Vector3(68, 0, -63))
@@ -4304,7 +4422,7 @@ func _build_title() -> void:
 	t2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	t2.add_theme_font_size_override("font_size", 19)
 	t2.add_theme_color_override("font_color", Color(0.8, 0.85, 0.95))
-	t2.text = "Днём делай дела. Ночью — беги. Почини яхту и сбеги с острова!"
+	t2.text = "Днём делай дела. Ночью — беги. Собери воздушный шар и улети с острова!"
 	title_root.add_child(t2)
 	# Мишганчик сбоку (узнаваемость + лёгкая жуть)
 	if _photo_tex() != null:
@@ -5374,6 +5492,11 @@ func _process(delta: float) -> void:
 			cam.position = Vector3(bx, 0.7 + by, 0)
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
+	if bal_parts_built >= 5 and bal_env != null:
+		var bb := sin(clock * 0.8) * 0.28
+		bal_env.position.y = BAL_POS.y + 6.6 + bb
+		bal_ropes.position.y = BAL_POS.y + bb * 0.85
+		bal_flame.scale.y = 1.0 + sin(clock * 7.0) * 0.22
 	_tick_mirror(delta)
 	_tick_warmup(delta)
 	_update_critters(delta)
@@ -5998,6 +6121,7 @@ func _update_quests(delta: float) -> void:
 func _finish_quest(q: Dictionary) -> void:
 	q["done"] = true
 	quests_done += 1
+	_update_balloon_stage()
 	if q["kind"] == "wood":
 		wood += 1
 	elif q["kind"] == "herb":
@@ -6029,7 +6153,7 @@ func _finish_quest(q: Dictionary) -> void:
 			if not _yacht_announced and quests_done >= quests.size() - 1:
 				_yacht_announced = true
 				done_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
-				done_label.text = "Все дела готовы! Чини яхту и беги!"
+				done_label.text = "Все дела готовы! Надувай шар и улетай!"
 				done_t = 2.8
 				_start_final_chase()
 
@@ -6356,9 +6480,9 @@ func _refresh_hud() -> void:
 			win_label.visible = true
 			win_label.add_theme_color_override("font_color", Color(0.5, 1.0, 0.6))
 			if true_end_run:
-				win_label.text = "ИСТИННАЯ КОНЦОВКА!\n\nТы собрал зеркало и спас друга.\nВы уплыли ВДВОЁМ.\n\n…а в пустой комнате треснувшее зеркало\nсмеётся само. Кривых было больше…"
+				win_label.text = "ИСТИННАЯ КОНЦОВКА!\n\nТы собрал зеркало и спас друга.\nВы улетели на шаре ВДВОЁМ.\n\n…а в пустой комнате треснувшее зеркало\nсмеётся само. Кривых было больше…"
 			else:
-				win_label.text = "СБЕЖАЛ НА ЯХТЕ!\n\nНочей пережито: %d\nПойман: %d раз\nВремя: %d:%02d" % [nights, caught, int(clock) / 60, int(clock) % 60]
+				win_label.text = "УЛЕТЕЛ НА ВОЗДУШНОМ ШАРЕ!\n\nНочей пережито: %d\nПойман: %d раз\nВремя: %d:%02d" % [nights, caught, int(clock) / 60, int(clock) % 60]
 		if restart_btn != null:
 			restart_btn.visible = true
 		if win_quit_btn != null:
