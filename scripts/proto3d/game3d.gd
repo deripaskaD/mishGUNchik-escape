@@ -12,7 +12,7 @@ const BORDER_TREES := 320   # плотная стена леса по перим
 const CLEARING := 11.0        # радиус поляны у избы без деревьев (меньше → лес ближе к дому)
 const HUTS := [Vector3(82, 0, -72), Vector3(136, 0, 92), Vector3(-165, 0, -50), Vector3(22, 0, 176)]
 # ориентиры-структуры — деревья оставляют вокруг них полянку (иначе густой лес их заслоняет)
-const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150)]
+const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150), Vector3(30, 0, 116)]
 const LANDMARK_CLEAR := 9.0
 const SPEED := 6.2
 const SPRINT := 9.6
@@ -101,6 +101,10 @@ var spot_node: SpotLight3D
 var spot_beam: MeshInstance3D
 var spot_ang := 0.0
 var _spot_hit_cd := 0.0
+const CAR_POS := Vector3(30.0, 0.0, 116.0)   # карусель старого парка (зона 2)
+var car_root: Node3D
+var car_horses: Array = []
+var _car_hit_cd := 0.0
 var machine_cd := [0.0, 0.0, 0.0]
 var machine_line := [0, 0, 0]
 var machine_lamps: Array = []
@@ -553,6 +557,9 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--shotcar" in args:
+		_shot = true
+		player.global_position = Vector3(30.0, _terrain_h(30.0, 125.0) + 1.6, 125.0)   # дефолт взгляда -Z — на карусель
 	if "--n6" in args:
 		clock = DAY_LEN * 5.62   # шестые сутки, ночь (nights считается из clock) — прожектор активен
 		spot_ang = PI * 0.5 - 0.42   # к моменту кадра луч смотрит на юг (в камеру --shottower)
@@ -1457,6 +1464,107 @@ func _smoke(pos: Vector3, amount: int, lifetime: float, gravity: Vector3, smin: 
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.material_override = mat
 	add_child(sm)
+
+func _build_carousel() -> void:
+	# заброшенная карусель: медленно крутится днём, ночью — быстрее; лошадки лягаются
+	var base_y := _terrain_h(CAR_POS.x, CAR_POS.z)
+	var root_static := Node3D.new()
+	root_static.position = Vector3(CAR_POS.x, base_y, CAR_POS.z)
+	add_child(root_static)
+	var plate := MeshInstance3D.new()
+	var pm := CylinderMesh.new()
+	pm.top_radius = 4.6
+	pm.bottom_radius = 4.8
+	pm.height = 0.34
+	plate.mesh = pm
+	plate.position = Vector3(0, 0.17, 0)
+	plate.material_override = _mat(Color(0.5, 0.42, 0.3))
+	root_static.add_child(plate)
+	var col := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.42
+	cm.bottom_radius = 0.5
+	cm.height = 3.8
+	col.mesh = cm
+	col.position = Vector3(0, 2.2, 0)
+	col.material_override = _mat(Color(0.72, 0.3, 0.3))
+	root_static.add_child(col)
+	var roof := MeshInstance3D.new()
+	var rm := CylinderMesh.new()
+	rm.top_radius = 0.25
+	rm.bottom_radius = 5.2
+	rm.height = 1.5
+	roof.mesh = rm
+	roof.position = Vector3(0, 4.75, 0)
+	var rsh := Shader.new()
+	rsh.code = """shader_type spatial;
+uniform vec4 c1 : source_color = vec4(0.86, 0.25, 0.22, 1.0);
+uniform vec4 c2 : source_color = vec4(0.96, 0.92, 0.8, 1.0);
+varying vec3 lp;
+void vertex() { lp = VERTEX; }
+void fragment() {
+	float st = step(0.5, fract(atan(lp.x, lp.z) * 1.9099));
+	ALBEDO = mix(c1.rgb, c2.rgb, st);
+	ROUGHNESS = 0.7;
+}
+"""
+	var rshm := ShaderMaterial.new()
+	rshm.shader = rsh
+	roof.material_override = rshm
+	root_static.add_child(roof)
+	# вращающаяся часть: 6 шестов с лошадками
+	car_root = Node3D.new()
+	car_root.position = Vector3(CAR_POS.x, base_y + 0.34, CAR_POS.z)
+	add_child(car_root)
+	var horse_cols := [Color(0.9, 0.55, 0.6), Color(0.55, 0.7, 0.95), Color(0.95, 0.85, 0.5), Color(0.6, 0.9, 0.65), Color(0.85, 0.65, 0.95), Color(0.95, 0.7, 0.45)]
+	for i in 6:
+		var ang := TAU * float(i) / 6.0
+		var arm := Node3D.new()
+		arm.position = Vector3(cos(ang) * 3.1, 0, sin(ang) * 3.1)
+		car_root.add_child(arm)
+		var pole := MeshInstance3D.new()
+		var polem := CylinderMesh.new()
+		polem.top_radius = 0.06
+		polem.bottom_radius = 0.06
+		polem.height = 3.9
+		pole.mesh = polem
+		pole.position = Vector3(0, 1.95, 0)
+		pole.material_override = _mat(Color(0.75, 0.7, 0.55))
+		arm.add_child(pole)
+		var horse := Node3D.new()
+		horse.position = Vector3(0, 1.15, 0)
+		arm.add_child(horse)
+		var hm := _mat(horse_cols[i])
+		_box(horse, Vector3(0, 0, 0), Vector3(0.95, 0.42, 0.34), hm, false)
+		_box(horse, Vector3(0.44, 0.34, 0), Vector3(0.3, 0.42, 0.26), hm, false)
+		_box(horse, Vector3(0.55, 0.6, 0), Vector3(0.36, 0.2, 0.2), hm, false)
+		for lx in [-0.3, 0.3]:
+			for lz2 in [-0.12, 0.12]:
+				_box(horse, Vector3(lx, -0.4, lz2), Vector3(0.09, 0.42, 0.09), hm, false)
+		car_horses.append(horse)
+
+func _tick_carousel(delta: float) -> void:
+	if car_root == null or won or lost or paused or liftoff_active:
+		return
+	var spd := 0.85 if _is_night() else 0.35
+	car_root.rotation.y += delta * spd
+	for i in car_horses.size():
+		var h := car_horses[i] as Node3D
+		h.position.y = 1.15 + sin(car_root.rotation.y * 3.0 + float(i) * 1.7) * 0.38
+	# тайминг-опасность: лошадка на ходу лягается (лёгкий стан) — пробеги между ними
+	_car_hit_cd = maxf(0.0, _car_hit_cd - delta)
+	if _car_hit_cd <= 0.0 and stun <= 0.0 and not _autoplay:
+		for h2 in car_horses:
+			var hp := (h2 as Node3D).global_position
+			if Vector2(player.global_position.x - hp.x, player.global_position.z - hp.z).length() < 0.95:
+				_car_hit_cd = 6.0
+				stun = 0.45
+				_play(snd_ding)
+				if done_label != null and done_t <= 0.0:
+					done_label.add_theme_color_override("font_color", Color(1.0, 0.75, 0.6))
+					done_label.text = "Лошадка лягнула! Осторожней на карусели…"
+					done_t = 2.2
+				break
 
 func _build_night_features() -> void:
 	# зеркальца-ловушки (активны с ночи 4): детерминированные позиции — стабильная регрессия
@@ -3275,6 +3383,7 @@ void fragment() {
 	_build_balloon()
 	_build_machines()
 	_build_night_features()
+	_build_carousel()
 	if false:
 		var boat := MeshInstance3D.new()
 		var bm := BoxMesh.new()
@@ -5740,6 +5849,7 @@ func _process(delta: float) -> void:
 	_tick_liftoff(delta)
 	_tick_machines(delta)
 	_tick_night_features(delta)
+	_tick_carousel(delta)
 	if bal_parts_built >= 5 and bal_env != null and not liftoff_active:
 		var bb := sin(clock * 0.8) * 0.28
 		bal_env.position.y = BAL_POS.y + 6.6 + bb
