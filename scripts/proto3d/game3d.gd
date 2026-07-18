@@ -117,6 +117,7 @@ var car_snd: AudioStreamPlayer3D
 var _sneak_t := 0.0            # н2+ стелс: неточная цель при тихой ходьбе
 var _sneak_target := Vector3.ZERO
 var _sneak_hint := false
+var laugh_bubbles: Array = []   # «пузыри смеха» из трубы Фабрики
 const FERRIS_POS := Vector3(150.0, 0.0, 160.0)   # колесо обозрения (зона 6)
 var ferris_root: Node3D
 var ferris_cabins: Array = []
@@ -4266,6 +4267,45 @@ func _build_quests() -> void:
 		_wall_col(bpos + Vector3(-1.9, 1.1, 1.35 * bso), Vector3(0.3, 2.2, 1.4))
 	_batch_scene(_kit("chimney"), Transform3D(Basis.from_scale(Vector3.ONE * 1.5), bpos + Vector3(1.0, 2.9, -0.8)))
 	_smoke(Vector3(177.0, 4.6, 27.2), 12, 3.6, Vector3(0.25, 0.4, 0.0), 0.4, 0.9, 0.3, 10.0, 0.4, 0.9)   # дым из бани
+	# ФАБРИКА СМЕХА (зона 3 концепта): фабричная труба + пузыри смеха + вывеска
+	var ft := MeshInstance3D.new()
+	var ftm := CylinderMesh.new()
+	ftm.top_radius = 0.55
+	ftm.bottom_radius = 0.75
+	ftm.height = 6.4
+	ft.mesh = ftm
+	ft.position = bpos + Vector3(-1.2, 3.2, 1.3)
+	ft.material_override = _mat(Color(0.4, 0.19, 0.15))
+	add_child(ft)
+	var bub_cols := [Color(1.0, 0.75, 0.85, 0.75), Color(1.0, 0.9, 0.5, 0.75), Color(0.7, 0.9, 1.0, 0.75)]
+	for i in 6:
+		var bub := MeshInstance3D.new()
+		var bmesh := SphereMesh.new()
+		bmesh.radius = 0.3
+		bmesh.height = 0.6
+		bub.mesh = bmesh
+		var bm2 := StandardMaterial3D.new()
+		bm2.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		bm2.albedo_color = bub_cols[i % 3]
+		bm2.emission_enabled = true
+		bm2.emission = Color(bub_cols[i % 3].r, bub_cols[i % 3].g, bub_cols[i % 3].b)
+		bm2.emission_energy_multiplier = 0.4
+		bub.material_override = bm2
+		bub.position = bpos + Vector3(-1.2, 6.6 + float(i) * 0.9, 1.3)
+		add_child(bub)
+		laugh_bubbles.append(bub)
+	if ResourceLoader.exists("res://art/fonts_comfortaa.ttf"):
+		var sign := Label3D.new()
+		sign.text = "ФАБРИКА СМЕХА"
+		sign.font = load("res://art/fonts_comfortaa.ttf")
+		sign.font_size = 96
+		sign.pixel_size = 0.006
+		sign.modulate = Color(1.0, 0.85, 0.3)
+		sign.outline_modulate = Color(0.25, 0.1, 0.05)
+		sign.outline_size = 22
+		sign.position = bpos + Vector3(-2.35, 3.05, 0)
+		sign.rotation.y = PI * 0.5   # текстом к тропе (запад)
+		add_child(sign)
 	# кости (-150,92): могильный холм + покосившийся крест + череп + кости
 	_box(self, Vector3(-150, 0.18, 92), Vector3(2.4, 0.35, 1.4), _mat(Color(0.30, 0.22, 0.14)), false)   # холм
 	var cr := Node3D.new()
@@ -6116,6 +6156,14 @@ func _process(delta: float) -> void:
 	_tick_night_features(delta)
 	_tick_carousel(delta)
 	_tick_ferris(delta)
+	for i in laugh_bubbles.size():
+		var bub := laugh_bubbles[i] as MeshInstance3D
+		bub.position.y += delta * 1.1
+		var ph := bub.position.y - float(int((bub.position.y - 4.0) / 5.4)) * 5.4
+		if bub.position.y > 12.4:
+			bub.position.y = 7.0
+		bub.scale = Vector3.ONE * (0.7 + 0.3 * sin(clock * 3.0 + float(i) * 2.0))
+		bub.position.x = 176.0 - 1.2 + sin(clock * 1.4 + float(i)) * 0.5
 	if bal_parts_built >= 5 and bal_env != null and not liftoff_active:
 		var bb := sin(clock * 0.8) * 0.28
 		bal_env.position.y = BAL_POS.y + 6.6 + bb
