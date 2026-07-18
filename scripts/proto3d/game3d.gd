@@ -77,6 +77,26 @@ var bal_flame: MeshInstance3D
 var bal_env: MeshInstance3D
 var bal_ropes: Node3D
 const BAL_POS := Vector3(11.5, 0.0, 199.5)   # шар на песчаной косе у причала
+# квестодатели-машины парка (концепт §5): статичные пропы с репликами
+const MACHINES := [
+	{"pos": Vector3(3.6, 0, 6.4), "name": "РОБОТ-КОНТРОЛЁР", "col": Color(0.55, 0.85, 1.0), "lines": [
+		"Билетик!.. Нет? Тогда живи тут.",
+		"№402, не бегайте по газону!",
+		"«Погоня» работает круглосуточно.",
+		"Тс-с. Он не любит чужой смех."]},
+	{"pos": Vector3(3.0, 0, 190.0), "name": "БУЛЬ-БУЛЬ", "col": Color(1.0, 0.75, 0.4), "lines": [
+		"Буль! Газировки нет с 1998-го.",
+		"Шар летает. А я прикручен.",
+		"Брось монетку!.. Шучу. Нет монет."]},
+	{"pos": Vector3(-143.0, 0, 86.0), "name": "ГАДАЛКА-402", "col": Color(0.85, 0.6, 1.0), "lines": [
+		"Вижу кривого… он совсем близко.",
+		"Твоё будущее: побег. Или нет.",
+		"7 осколков — и зеркало скажет правду.",
+		"Погадать? С тебя улыбка."]},
+]
+var machine_cd := [0.0, 0.0, 0.0]
+var machine_line := [0, 0, 0]
+var machine_lamps: Array = []
 var liftoff_active := false    # финальная сцена взлёта (клип-момент)
 var liftoff_t := 0.0
 var bal_lift := 0.0
@@ -526,6 +546,17 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--shotmach" in args:
+		_shot = true
+		player.global_position = Vector3(3.6, 1.6, 9.6)   # взгляд по умолчанию -Z — на робота
+	if "--shotmach2" in args:
+		_shot = true
+		player.global_position = Vector3(3.0, 1.6, 187.0)
+		player.rotate_y(PI)
+	if "--shotmach3" in args:
+		_shot = true
+		player.global_position = Vector3(-143.0, 1.6, 82.6)
+		player.rotate_y(PI)
 	if "--shotbal" in args:
 		_shot = true
 		player.global_position = Vector3(7.0, 1.6, 192.0)
@@ -1416,6 +1447,86 @@ func _smoke(pos: Vector3, amount: int, lifetime: float, gravity: Vector3, smin: 
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.material_override = mat
 	add_child(sm)
+
+func _build_machines() -> void:
+	# три машины-квестодателя: жестяной робот, автомат газировки, будка-гадалка
+	for i in MACHINES.size():
+		var m: Dictionary = MACHINES[i]
+		var base := Node3D.new()
+		var mp: Vector3 = m["pos"]
+		base.position = Vector3(mp.x, _terrain_h(mp.x, mp.z), mp.z)
+		if i >= 1:
+			base.rotation.y = PI   # панель/занавес лицом к северу — откуда подходит игрок
+		add_child(base)
+		if i == 0:   # робот: цилиндр-тело + куб-голова + глаза
+			var body := MeshInstance3D.new()
+			var bcm := CylinderMesh.new()
+			bcm.top_radius = 0.42
+			bcm.bottom_radius = 0.52
+			bcm.height = 1.3
+			body.mesh = bcm
+			body.position = Vector3(0, 0.65, 0)
+			body.material_override = _mat(Color(0.45, 0.55, 0.62))
+			base.add_child(body)
+			_box(base, Vector3(0, 1.62, 0), Vector3(0.62, 0.55, 0.55), _mat(Color(0.55, 0.65, 0.72)), false)
+			_box(base, Vector3(-0.14, 1.66, 0.28), Vector3(0.12, 0.12, 0.04), _mat(Color(0.1, 0.12, 0.15)), false)
+			_box(base, Vector3(0.14, 1.66, 0.28), Vector3(0.12, 0.12, 0.04), _mat(Color(0.1, 0.12, 0.15)), false)
+		elif i == 1:   # автомат: высокий короб с окном и краном
+			_box(base, Vector3(0, 0.95, 0), Vector3(1.1, 1.9, 0.8), _mat(Color(0.85, 0.35, 0.3)), false)
+			_box(base, Vector3(0, 1.32, 0.42), Vector3(0.8, 0.6, 0.04), _mat(Color(0.92, 0.9, 0.8)), false)
+			_box(base, Vector3(0, 0.5, 0.44), Vector3(0.4, 0.3, 0.1), _mat(Color(0.2, 0.2, 0.24)), false)
+		else:   # гадалка: будка с занавесом и хрустальным шаром
+			_box(base, Vector3(0, 1.1, 0), Vector3(1.4, 2.2, 1.1), _mat(Color(0.4, 0.22, 0.5)), false)
+			_box(base, Vector3(0, 1.5, 0.56), Vector3(1.1, 1.0, 0.04), _mat(Color(0.16, 0.1, 0.2)), false)
+			var orb := MeshInstance3D.new()
+			var om := SphereMesh.new()
+			om.radius = 0.19
+			om.height = 0.38
+			orb.mesh = om
+			orb.position = Vector3(0, 1.28, 0.62)
+			var orbm := StandardMaterial3D.new()
+			orbm.albedo_color = Color(0.75, 0.9, 1.0)
+			orbm.emission_enabled = true
+			orbm.emission = Color(0.55, 0.8, 1.0)
+			orbm.emission_energy_multiplier = 0.9
+			orb.material_override = orbm
+			base.add_child(orb)
+		# мигающая лампочка сверху — маркер «я живой, подойди»
+		var lamp := MeshInstance3D.new()
+		var lm := SphereMesh.new()
+		lm.radius = 0.11
+		lm.height = 0.22
+		lamp.mesh = lm
+		lamp.position = Vector3(0, 2.15 if i == 0 else 2.05, 0)
+		var lampm := StandardMaterial3D.new()
+		lampm.albedo_color = m["col"]
+		lampm.emission_enabled = true
+		lampm.emission = m["col"]
+		lampm.emission_energy_multiplier = 1.4
+		lamp.material_override = lampm
+		base.add_child(lamp)
+		machine_lamps.append(lamp)
+
+func _tick_machines(delta: float) -> void:
+	if _autoplay or won or lost or paused or machine_lamps.is_empty():
+		return
+	for i in MACHINES.size():
+		machine_cd[i] = maxf(0.0, machine_cd[i] - delta)
+		var lamp := machine_lamps[i] as MeshInstance3D
+		if lamp != null:
+			(lamp.material_override as StandardMaterial3D).emission_energy_multiplier = 1.1 + sin(clock * 2.6 + float(i) * 2.1) * 0.7
+		if machine_cd[i] > 0.0 or done_label == null or done_t > 0.0:
+			continue
+		var m: Dictionary = MACHINES[i]
+		var mp: Vector3 = m["pos"]
+		if Vector2(player.global_position.x - mp.x, player.global_position.z - mp.z).length() < 3.4:
+			var lines: Array = m["lines"]
+			done_label.add_theme_color_override("font_color", m["col"])
+			done_label.text = "%s:\n«%s»" % [m["name"], lines[machine_line[i] % lines.size()]]
+			done_t = 3.6
+			machine_line[i] += 1
+			machine_cd[i] = 26.0
+			_play(snd_ding)
 
 func _build_balloon() -> void:
 	# видимая сборка шара из 5 частей: кучка деталей → корзина → горелка →
@@ -3038,6 +3149,7 @@ void fragment() {
 	# причал + воздушный шар (концепт «Остров Смеха»: побег — по воздуху)
 	_box(self, Vector3(8, 0.3, 200), Vector3(2.6, 0.3, 16), m_log, false)
 	_build_balloon()
+	_build_machines()
 	if false:
 		var boat := MeshInstance3D.new()
 		var bm := BoxMesh.new()
@@ -5501,6 +5613,7 @@ func _process(delta: float) -> void:
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
 	_tick_liftoff(delta)
+	_tick_machines(delta)
 	if bal_parts_built >= 5 and bal_env != null and not liftoff_active:
 		var bb := sin(clock * 0.8) * 0.28
 		bal_env.position.y = BAL_POS.y + 6.6 + bb
