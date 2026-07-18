@@ -254,6 +254,7 @@ var _perf_t := 0.0
 var _perf_day: Array = []
 var _perf_night: Array = []
 var restart_btn: Button
+var trophy_btn: Button
 var win_quit_btn: Button
 const MAX_LIVES := 3
 var lives := MAX_LIVES
@@ -558,6 +559,16 @@ func _ready() -> void:
 			var cf := critters[3]["node"] as Node3D if critters.size() > 3 else null
 			if cf != null:
 				cf.position = Vector3(49, _terrain_h(49, 36), 36)
+	if "--shottrophy" in args:
+		_shot = true
+		_shot_saved = true   # гейт авто-квита скрин-режима (иначе выйдет раньше рендера карточки)
+		won = true
+		nights = 4
+		caught = 2
+		get_tree().create_timer(2.0).timeout.connect(func():
+			await _save_trophy()
+			await get_tree().create_timer(0.3).timeout
+			get_tree().quit())
 	if "--perf" in args:
 		_shot = true   # заморозка ИИ — чистый замер рендера
 		_perf_test = true
@@ -3850,6 +3861,14 @@ void fragment() {
 	win_label.add_theme_constant_override("outline_size", 8)
 	win_label.visible = false
 	layer.add_child(win_label)
+	trophy_btn = Button.new()
+	trophy_btn.text = "🏆 Сохранить картинку"
+	trophy_btn.size = Vector2(280, 52)
+	trophy_btn.position = Vector2(vp.x * 0.5 - 140, vp.y - 218)
+	_style_button(trophy_btn, Color(0.72, 0.55, 0.2), 19)
+	trophy_btn.visible = false
+	trophy_btn.pressed.connect(_save_trophy)
+	layer.add_child(trophy_btn)
 	restart_btn = Button.new()
 	restart_btn.text = "Играть снова"
 	restart_btn.size = Vector2(250, 60)
@@ -4779,6 +4798,92 @@ func _toggle_gfx() -> void:
 
 func _quit_game() -> void:
 	get_tree().quit()
+
+func _save_trophy() -> void:
+	# М: мем-карточка-трофей (скример-фон + результат + иконка). Сохранение, не «поделись».
+	var sv := SubViewport.new()
+	sv.size = Vector2i(720, 405)
+	sv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(sv)
+	var root := Control.new()
+	root.size = Vector2(720, 405)
+	sv.add_child(root)
+	var bgp := "res://art/ui/win_bg.jpg" if won else "res://art/ui/lose_bg.jpg"
+	if ResourceLoader.exists(bgp):
+		var bg := TextureRect.new()
+		bg.texture = load(bgp)
+		bg.size = Vector2(720, 405)
+		bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		root.add_child(bg)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.38)
+	dim.size = Vector2(720, 405)
+	root.add_child(dim)
+	var t1 := Label.new()
+	t1.size = Vector2(720, 90)
+	t1.position = Vector2(0, 96)
+	t1.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if font_bold != null:
+		t1.add_theme_font_override("font", font_bold)
+	t1.add_theme_font_size_override("font_size", 34)
+	t1.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3) if lost else Color(0.5, 1.0, 0.6))
+	t1.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	t1.add_theme_constant_override("outline_size", 10)
+	t1.text = ("МЕНЯ ПОЙМАЛ %s!" % _cname().to_upper()) if lost else ("%s МЕНЯ НЕ ПОЙМАЛ!" % _cname().to_upper())
+	root.add_child(t1)
+	var t2 := Label.new()
+	t2.size = Vector2(720, 60)
+	t2.position = Vector2(0, 172)
+	t2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if font_bold != null:
+		t2.add_theme_font_override("font", font_bold)
+	t2.add_theme_font_size_override("font_size", 30)
+	t2.add_theme_color_override("font_color", Color(1.0, 0.92, 0.6))
+	t2.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	t2.add_theme_constant_override("outline_size", 8)
+	t2.text = "Выжил %d %s" % [nights, "ночь" if nights == 1 else ("ночи" if nights < 5 else "ночей")]
+	root.add_child(t2)
+	var plate := ColorRect.new()
+	plate.color = Color(0.03, 0.05, 0.1, 0.6)
+	plate.size = Vector2(720, 104)
+	plate.position = Vector2(0, 301)
+	root.add_child(plate)
+	if ResourceLoader.exists("res://icon.png"):
+		var ic := TextureRect.new()
+		ic.texture = load("res://icon.png")
+		ic.size = Vector2(84, 84)
+		ic.position = Vector2(20, 301)
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		root.add_child(ic)
+	var t3 := Label.new()
+	t3.size = Vector2(700, 40)
+	t3.position = Vector2(116, 328)
+	if font_bold != null:
+		t3.add_theme_font_override("font", font_bold)
+	t3.add_theme_font_size_override("font_size", 22)
+	t3.add_theme_color_override("font_color", Color(1, 1, 1))
+	t3.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	t3.add_theme_constant_override("outline_size", 6)
+	t3.text = CC.GAME_TITLE
+	root.add_child(t3)
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw   # SubViewport гарантированно отрисован
+	var img := sv.get_texture().get_image()
+	sv.queue_free()
+	var ok := false
+	if OS.has_feature("web"):
+		var b64 := Marshalls.raw_to_base64(img.save_png_to_buffer())
+		JavaScriptBridge.eval("(function(){var a=document.createElement('a');a.href='data:image/png;base64,%s';a.download='mishganchik_trophy.png';document.body.appendChild(a);a.click();a.remove();})();" % b64, true)
+		ok = true
+	else:
+		var dir := OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)
+		if dir != "":
+			ok = img.save_png(dir.path_join("mishganchik_trophy.png")) == OK
+	if ok:
+		trophy_btn.text = "🏆 Сохранено!"
+		if analytics != null:
+			analytics.log_event("share_card_saved")
 
 func _restart_game() -> void:
 	get_tree().reload_current_scene()
@@ -6076,10 +6181,14 @@ func _refresh_hud() -> void:
 			restart_btn.visible = true
 		if win_quit_btn != null:
 			win_quit_btn.visible = true
+		if trophy_btn != null:
+			trophy_btn.visible = nights >= 3   # трофей-награда за стойкость (М: не давим на шэр)
 		return
 	if won:
 		hud.text = ""
 		_hide_gameplay_hud()
+		if trophy_btn != null:
+			trophy_btn.visible = true
 		if end_bg != null and ResourceLoader.exists("res://art/ui/win_bg.jpg"):
 			end_bg.texture = load("res://art/ui/win_bg.jpg")
 			end_bg.modulate = Color(0.9, 0.9, 0.9)
