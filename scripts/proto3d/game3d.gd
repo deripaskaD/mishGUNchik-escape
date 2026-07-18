@@ -12,7 +12,7 @@ const BORDER_TREES := 320   # плотная стена леса по перим
 const CLEARING := 11.0        # радиус поляны у избы без деревьев (меньше → лес ближе к дому)
 const HUTS := [Vector3(82, 0, -72), Vector3(136, 0, 92), Vector3(-165, 0, -50), Vector3(22, 0, 176)]
 # ориентиры-структуры — деревья оставляют вокруг них полянку (иначе густой лес их заслоняет)
-const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150), Vector3(30, 0, 116)]
+const LANDMARKS := [Vector3(-110, 0, -130), Vector3(-135, 0, 150), Vector3(160, 0, -55), Vector3(-85, 0, 75), Vector3(-170, 0, -45), Vector3(-60, 0, -185), Vector3(95, 0, 38), Vector3(-42, 0, 120), Vector3(176, 0, 28), Vector3(-150, 0, 92), Vector3(73, 0, -68), Vector3(130, 0, 100), Vector3(55, 0, 170), Vector3(15, 0, 188), Vector3(135, 0, -150), Vector3(30, 0, 116), Vector3(150, 0, 160)]
 const LANDMARK_CLEAR := 9.0
 const SPEED := 6.2
 const SPRINT := 9.6
@@ -114,6 +114,10 @@ var car_root: Node3D
 var car_horses: Array = []
 var _car_hit_cd := 0.0
 var car_snd: AudioStreamPlayer3D
+const FERRIS_POS := Vector3(150.0, 0.0, 160.0)   # колесо обозрения (зона 6)
+var ferris_root: Node3D
+var ferris_cabins: Array = []
+var ferris_lights: Array = []
 var machine_cd := [0.0, 0.0, 0.0]
 var machine_line := [0, 0, 0]
 var machine_lamps: Array = []
@@ -566,6 +570,10 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--shotferris" in args:
+		_shot = true
+		player.global_position = Vector3(144.0, _terrain_h(144.0, 172.0) + 1.6, 172.0)
+		player.rotate_y(-0.47)   # взгляд на хаб колеса
 	if "--shotpro" in args:
 		_shot = true
 		prologue_seen = false
@@ -1568,6 +1576,93 @@ void fragment() {
 		car_snd.max_distance = 44.0
 		root_static.add_child(car_snd)
 		car_snd.play()
+
+func _build_ferris() -> void:
+	# колесо обозрения: вертикальное, 8 кабинок, ночью — гирлянда огней
+	var base_y := _terrain_h(FERRIS_POS.x, FERRIS_POS.z)
+	var R := 8.5
+	var hub := Vector3(FERRIS_POS.x, base_y + R + 1.6, FERRIS_POS.z)
+	var leg_m := _mat(Color(0.45, 0.5, 0.58))
+	for sx in [-1.0, 1.0]:
+		for a in [0.34, -0.34]:
+			var leg := MeshInstance3D.new()
+			var lm := CylinderMesh.new()
+			lm.top_radius = 0.16
+			lm.bottom_radius = 0.22
+			lm.height = (R + 1.7) / cos(a)
+			leg.mesh = lm
+			leg.position = Vector3(hub.x + sin(a) * (R + 1.7) * 0.5, base_y + (R + 1.6) * 0.5, hub.z + sx * 1.1)
+			leg.rotation.z = a
+			leg.material_override = leg_m
+			add_child(leg)
+	var axle := MeshInstance3D.new()
+	var am := CylinderMesh.new()
+	am.top_radius = 0.24
+	am.bottom_radius = 0.24
+	am.height = 2.8
+	axle.mesh = am
+	axle.position = hub
+	axle.rotation.x = PI * 0.5   # ось вдоль Z
+	axle.material_override = leg_m
+	add_child(axle)
+	ferris_root = Node3D.new()
+	ferris_root.position = hub
+	add_child(ferris_root)
+	var rim_m := _mat(Color(0.85, 0.4, 0.35))
+	for i in 16:
+		var ang := TAU * float(i) / 16.0
+		var seg := MeshInstance3D.new()
+		var sm := BoxMesh.new()
+		sm.size = Vector3(TAU * R / 16.0 * 1.04, 0.22, 0.22)
+		seg.mesh = sm
+		seg.position = Vector3(cos(ang + TAU / 32.0) * R, sin(ang + TAU / 32.0) * R, 0)
+		seg.rotation.z = ang + TAU / 32.0 + PI * 0.5
+		seg.material_override = rim_m
+		ferris_root.add_child(seg)
+		var bulb := MeshInstance3D.new()
+		var bm := SphereMesh.new()
+		bm.radius = 0.16
+		bm.height = 0.32
+		bulb.mesh = bm
+		bulb.position = Vector3(cos(ang) * R, sin(ang) * R, 0.35)
+		var bmm := StandardMaterial3D.new()
+		bmm.albedo_color = Color(1.0, 0.85, 0.4)
+		bmm.emission_enabled = true
+		bmm.emission = Color(1.0, 0.8, 0.35)
+		bmm.emission_energy_multiplier = 0.3
+		bulb.material_override = bmm
+		ferris_root.add_child(bulb)
+		ferris_lights.append(bmm)
+	for i in 8:
+		var ang2 := TAU * float(i) / 8.0
+		var spoke := MeshInstance3D.new()
+		var spm := CylinderMesh.new()
+		spm.top_radius = 0.07
+		spm.bottom_radius = 0.07
+		spm.height = R
+		spoke.mesh = spm
+		spoke.position = Vector3(cos(ang2) * R * 0.5, sin(ang2) * R * 0.5, 0)
+		spoke.rotation.z = ang2 + PI * 0.5
+		spoke.material_override = leg_m
+		ferris_root.add_child(spoke)
+		var seat := Node3D.new()
+		seat.position = Vector3(cos(ang2) * R, sin(ang2) * R, 0)
+		ferris_root.add_child(seat)
+		var cab_cols := [Color(0.9, 0.5, 0.55), Color(0.5, 0.65, 0.9), Color(0.95, 0.8, 0.45), Color(0.55, 0.85, 0.6)]
+		var cm2 := _mat(cab_cols[i % 4])
+		_box(seat, Vector3(0, -0.85, 0), Vector3(1.0, 0.8, 0.9), cm2, false)
+		_box(seat, Vector3(0, -0.38, 0.42), Vector3(1.0, 0.5, 0.08), cm2, false)
+		ferris_cabins.append(seat)
+
+func _tick_ferris(delta: float) -> void:
+	if ferris_root == null or won or lost or paused or liftoff_active:
+		return
+	ferris_root.rotation.z += delta * 0.14
+	for c in ferris_cabins:
+		(c as Node3D).rotation.z = -ferris_root.rotation.z   # кабинки всегда вертикальны
+	var glow := 2.2 if _is_night() else 0.3
+	for m in ferris_lights:
+		(m as StandardMaterial3D).emission_energy_multiplier = glow
 
 func _tick_carousel(delta: float) -> void:
 	if car_root == null or won or lost or paused or liftoff_active:
@@ -3412,6 +3507,7 @@ void fragment() {
 	_build_machines()
 	_build_night_features()
 	_build_carousel()
+	_build_ferris()
 	if false:
 		var boat := MeshInstance3D.new()
 		var bm := BoxMesh.new()
@@ -5885,6 +5981,7 @@ func _process(delta: float) -> void:
 	_tick_machines(delta)
 	_tick_night_features(delta)
 	_tick_carousel(delta)
+	_tick_ferris(delta)
 	if bal_parts_built >= 5 and bal_env != null and not liftoff_active:
 		var bb := sin(clock * 0.8) * 0.28
 		bal_env.position.y = BAL_POS.y + 6.6 + bb
