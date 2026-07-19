@@ -117,6 +117,9 @@ var car_snd: AudioStreamPlayer3D
 var _sneak_t := 0.0            # н2+ стелс: неточная цель при тихой ходьбе
 var _sneak_target := Vector3.ZERO
 var _sneak_hint := false
+var _qtest := false
+var _qtest_t := 0.0
+var _qtest_started := false
 var laugh_bubbles: Array = []   # «пузыри смеха» из трубы Фабрики
 const FERRIS_POS := Vector3(150.0, 0.0, 160.0)   # колесо обозрения (зона 6)
 var ferris_root: Node3D
@@ -574,6 +577,8 @@ func _ready() -> void:
 		_shot = true
 		player.global_position = Vector3(WORLD - 12.0, 1.5, 0)
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
+	if "--qtest" in args:
+		_qtest = true
 	if "--shotmaze" in args:
 		_shot = true
 		player.global_position = Vector3(95.0, _terrain_h(95.0, -122.0) + 1.6, -122.0)
@@ -6150,6 +6155,26 @@ func _process(delta: float) -> void:
 			cam.position = Vector3(bx, 0.7 + by, 0)
 	if fire_light != null:   # мерцание костра
 		fire_light.light_energy = 2.2 + sin(clock * 9.0) * 0.4 + sin(clock * 23.0) * 0.2
+	if _qtest:
+		_qtest_t += delta
+		if _qtest_t > 2.0 and not _qtest_started:
+			_qtest_started = true
+			_start_game()
+		if _qtest_t > 5.0 and prologue_active:
+			_end_prologue()
+		if _qtest_t > 6.0 and _qtest_t < 14.0:
+			for q in quests:
+				if q.has("subs") and not q["done"]:
+					for sub in q["subs"]:
+						if not sub["done"]:
+							player.global_position = (sub["pos"] as Vector3) + Vector3(0.3, 1.2, 0.3)
+							break
+					if Engine.get_process_frames() % 30 == 0:
+						print("QTEST kind=%s prog=%.2f done=%d subs_vis=%s" % [q["kind"], q["prog"], quests_done, (q["subs"][0]["node"] as Node3D).visible])
+					break
+		if _qtest_t > 15.0:
+			print("QTEST FINAL done=%d" % quests_done)
+			get_tree().quit()
 	_tick_liftoff(delta)
 	_tick_prologue(delta)
 	_tick_machines(delta)
@@ -6609,9 +6634,14 @@ func _true_ending() -> void:
 		analytics.log_event("true_ending", {"nights": nights})
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
+var _warmup_wall := 0.0   # тайм-кап прогрева: на троттленных вкладках 96 кадров = минуты
+
 func _tick_warmup(_delta: float) -> void:
 	if _warmup_frames <= 0:
 		return
+	_warmup_wall += _delta
+	if _warmup_wall > 45.0:
+		_warmup_frames = 1   # кап 45 с реального времени: лучше редкие фризы, чем «зависшая» загрузка
 	_warmup_frames -= 1
 	player.rotate_y(TAU / 40.0)                       # оборот за 40 кадров: все ракурсы независимо от времени кадра
 	if _warmup_frames == 36:
