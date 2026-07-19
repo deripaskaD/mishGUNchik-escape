@@ -579,6 +579,17 @@ func _ready() -> void:
 		player.rotate_y(-PI * 0.5)   # смотрит к краю (+X) — проверка стены леса/границы
 	if "--qtest" in args:
 		_qtest = true
+	if "--shotsubs" in args:
+		_shot = true
+		for q in quests:
+			if q.has("subs") and not q["done"]:
+				var sp: Vector3 = q["subs"][0]["pos"]
+				for sub in q["subs"]:
+					var n := sub["node"] as Node3D
+					var r2 := sub["ray"] as Node3D
+					print("SUBSDBG %s sub=%s nvis=%s rvis=%s ninside=%s npos=%s" % [q["id"], sub["pos"], n.visible, r2.visible, n.is_inside_tree(), n.global_position])
+				player.global_position = (q["pos"] as Vector3) + Vector3(0, 1.6, 6.0)   # южнее квеста, дефолтный взгляд -Z — на точку
+				break
 	if "--shotmaze" in args:
 		_shot = true
 		player.global_position = Vector3(95.0, _terrain_h(95.0, -122.0) + 1.6, -122.0)
@@ -4349,12 +4360,30 @@ func _add_quest(id: String, pos: Vector3, label: String, kind: String) -> void:
 			sp.y = _terrain_h(sp.x, sp.z)
 			var mk := MeshInstance3D.new()
 			var sm := SphereMesh.new()
-			sm.radius = 0.24
-			sm.height = 0.48
+			sm.radius = 0.45
+			sm.height = 0.9
 			mk.mesh = sm
 			mk.position = sp + Vector3(0, 1.0, 0)
 			mk.material_override = _emissive_mat(Color(1.0, 0.9, 0.4), Color(1.0, 0.85, 0.3), 2.2)
 			add_child(mk)
+			# мини-столб света над каждой точкой сбора — видно из-за подлеска и днём
+			var ray := MeshInstance3D.new()
+			var rc := CylinderMesh.new()
+			rc.top_radius = 0.16
+			rc.bottom_radius = 0.34
+			rc.height = 7.0
+			ray.mesh = rc
+			ray.position = sp + Vector3(0, 4.0, 0)
+			var raym := StandardMaterial3D.new()
+			raym.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			raym.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			raym.albedo_color = Color(1.0, 0.88, 0.35, 0.38)
+			raym.emission_enabled = true
+			raym.emission = Color(1.0, 0.85, 0.3)
+			raym.emission_energy_multiplier = 0.8
+			raym.cull_mode = BaseMaterial3D.CULL_DISABLED
+			ray.material_override = raym
+			add_child(ray)
 			var st := MeshInstance3D.new()
 			var stc := CylinderMesh.new()
 			stc.top_radius = 0.045
@@ -4364,7 +4393,7 @@ func _add_quest(id: String, pos: Vector3, label: String, kind: String) -> void:
 			st.position = sp + Vector3(0, 0.5, 0)
 			st.material_override = _mat(Color(0.5, 0.4, 0.25))
 			add_child(st)
-			subs.append({"pos": sp, "done": false, "node": mk, "post": st})
+			subs.append({"pos": sp, "done": false, "node": mk, "post": st, "ray": ray})
 		quests[quests.size() - 1]["subs"] = subs
 	# маяк-столб света (видно в тумане)
 	var beam := MeshInstance3D.new()
@@ -6937,6 +6966,8 @@ func _update_quests(delta: float) -> void:
 					got += 1
 					(sub["node"] as Node3D).visible = false
 					(sub["post"] as Node3D).visible = false
+					if sub.has("ray"):
+						(sub["ray"] as Node3D).visible = false
 					_play(snd_ding)
 					if catch_flash != null:
 						catch_flash.color = Color(0.2, 1.0, 0.4, 0.0)
